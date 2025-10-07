@@ -1,3 +1,4 @@
+console.log("PG_CONNECTION_STRING:", process.env.PG_CONNECTION_STRING);
 if (process.env.NODE_ENV !== 'production') require('dotenv').config();
 
 const express = require('express');
