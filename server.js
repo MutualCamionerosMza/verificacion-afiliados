@@ -7,7 +7,6 @@ const { Client } = require('pg');
 const path = require('path');
 const fs = require('fs');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
-const csv = require('csv-parser');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -54,7 +53,7 @@ async function conectarPG() {
 }
 conectarPG();
 
-async function inicializarTablasYDatos() {
+async function inicializarTablas() {
   await client.query(`
     CREATE TABLE IF NOT EXISTS afiliados (
       id SERIAL PRIMARY KEY,
@@ -75,61 +74,10 @@ async function inicializarTablasYDatos() {
     )
   `);
 
-  console.log('🔹 Importando CSV de afiliados (sobrescribe datos existentes)...');
-  await importarCSV();
+  console.log('🔹 Tablas inicializadas. NO se importará CSV automáticamente.');
 }
 
-async function importarCSV() {
-  return new Promise((resolve, reject) => {
-    const filas = [];
-    fs.createReadStream(path.resolve(__dirname, 'afiliados.csv'))
-      .pipe(csv({
-        mapHeaders: ({ header, index }) => {
-          if (index === 0) return 'nro_afiliado';
-          if (index === 1) return 'nombre_completo';
-          if (index === 2) return 'dni';
-          return null;
-        }
-      }))
-      .on('data', (data) => {
-        if (data.nro_afiliado && data.nombre_completo && data.dni) {
-          filas.push({
-            nro_afiliado: data.nro_afiliado.trim(),
-            nombre_completo: data.nombre_completo.trim(),
-            dni: data.dni.trim()
-          });
-        }
-      })
-      .on('end', async () => {
-        try {
-          // Eliminamos todos los datos existentes
-          await client.query(`DELETE FROM afiliados`);
-
-          for (const f of filas) {
-            await client.query(
-              `INSERT INTO afiliados (nro_afiliado, nombre_completo, dni)
-               VALUES ($1, $2, $3)
-               ON CONFLICT (dni) DO UPDATE
-               SET nombre_completo = EXCLUDED.nombre_completo,
-                   nro_afiliado = EXCLUDED.nro_afiliado`,
-              [f.nro_afiliado, f.nombre_completo, f.dni]
-            );
-          }
-          console.log(`✅ Importados ${filas.length} afiliados desde CSV`);
-          resolve();
-        } catch (err) {
-          console.error('❌ Error importando CSV:', err.message);
-          reject(err);
-        }
-      })
-      .on('error', (error) => {
-        console.error('❌ Error leyendo CSV:', error.message);
-        reject(error);
-      });
-  });
-}
-
-inicializarTablasYDatos();
+inicializarTablas();
 
 const ADMIN_PIN = '1906';
 
