@@ -20,8 +20,11 @@ const allowedOrigins = [
 app.use(cors({
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    else return callback(new Error('CORS no permitido para el origen: ' + origin), false);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(new Error('CORS no permitido para el origen: ' + origin), false);
+    }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
@@ -51,7 +54,6 @@ async function conectarPG() {
 }
 conectarPG();
 
-// --- Inicialización de tablas y datos ---
 async function inicializarTablasYDatos() {
   await client.query(`
     CREATE TABLE IF NOT EXISTS afiliados (
@@ -74,10 +76,10 @@ async function inicializarTablasYDatos() {
   `);
 
   console.log('🔹 Importando CSV de afiliados (sobrescribe datos existentes)...');
-  await importarCSV(true);
+  await importarCSV();
 }
 
-async function importarCSV(sobrescribir = false) {
+async function importarCSV() {
   return new Promise((resolve, reject) => {
     const filas = [];
     fs.createReadStream(path.resolve(__dirname, 'afiliados.csv'))
@@ -100,16 +102,16 @@ async function importarCSV(sobrescribir = false) {
       })
       .on('end', async () => {
         try {
-          if (sobrescribir) {
-            console.log('🔹 Eliminando datos antiguos de afiliados...');
-            await client.query('DELETE FROM afiliados');
-          }
+          // Eliminamos todos los datos existentes
+          await client.query(`DELETE FROM afiliados`);
+
           for (const f of filas) {
             await client.query(
               `INSERT INTO afiliados (nro_afiliado, nombre_completo, dni)
                VALUES ($1, $2, $3)
-               ON CONFLICT (dni, nro_afiliado) DO UPDATE
-               SET nombre_completo = EXCLUDED.nombre_completo`,
+               ON CONFLICT (dni) DO UPDATE
+               SET nombre_completo = EXCLUDED.nombre_completo,
+                   nro_afiliado = EXCLUDED.nro_afiliado`,
               [f.nro_afiliado, f.nombre_completo, f.dni]
             );
           }
@@ -129,8 +131,8 @@ async function importarCSV(sobrescribir = false) {
 
 inicializarTablasYDatos();
 
-// --- Validación de PIN ---
 const ADMIN_PIN = '1906';
+
 function validarPin(req, res, next) {
   const pin = req.headers['x-admin-pin'] || req.body.pin || req.query.pin;
   if (pin === ADMIN_PIN) next();
@@ -141,20 +143,22 @@ function esNumero(str) {
   return /^\d+$/.test(str);
 }
 
-// --- ENDPOINT DE PRUEBA ---
-app.get('/test-db', async (req, res) => {
+// === ENDPOINTS ===
+
+// Endpoint de prueba
+app.get('/ping', async (req, res) => {
   try {
-    const result = await client.query('SELECT COUNT(*) FROM afiliados');
-    res.json({ success: true, afiliados_count: parseInt(result.rows[0].count, 10) });
+    const result = await client.query('SELECT NOW()');
+    res.json({ db: 'OK', time: result.rows[0].now });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ db: 'ERROR', message: err.message });
   }
 });
 
-// --- RUTAS EXISTENTES ---
 app.post('/verificar', async (req, res) => {
   const { dni } = req.body;
   if (!dni || !esNumero(dni)) return res.status(400).json({ error: 'DNI inválido' });
+
   try {
     const result = await client.query('SELECT nro_afiliado, nombre_completo, dni FROM afiliados WHERE dni = $1', [dni.trim()]);
     res.json(result.rows.length > 0 ? { afiliado: true, datos: result.rows[0] } : { afiliado: false });
@@ -166,6 +170,7 @@ app.post('/verificar', async (req, res) => {
 app.post('/credencial', async (req, res) => {
   const { dni } = req.body;
   if (!dni || !esNumero(dni)) return res.status(400).json({ error: 'DNI inválido' });
+
   try {
     const result = await client.query('SELECT * FROM afiliados WHERE dni = $1', [dni.trim()]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Afiliado no encontrado' });
@@ -196,7 +201,8 @@ app.post('/credencial', async (req, res) => {
   }
 });
 
-// --- ADMIN RUTAS ---
+// === ADMIN ENDPOINTS ===
+
 app.post('/admin/cargar-afiliados', validarPin, async (req, res) => {
   let { nro_afiliado, nombre_completo, dni } = req.body;
   if (!nro_afiliado || !nombre_completo || !dni) return res.status(400).json({ error: 'Faltan datos' });
@@ -205,7 +211,8 @@ app.post('/admin/cargar-afiliados', validarPin, async (req, res) => {
   nombre_completo = nombre_completo.trim();
   dni = dni.trim();
 
-  if (!esNumero(dni) || !esNumero(nro_afiliado)) return res.status(400).json({ error: 'DNI o N° Afiliado inválido' });
+  if (!esNumero(dni)) return res.status(400).json({ error: 'DNI inválido' });
+  if (!esNumero(nro_afiliado)) return res.status(400).json({ error: 'N° Afiliado inválido' });
 
   try {
     const dniExiste = await client.query('SELECT 1 FROM afiliados WHERE dni = $1', [dni]);
@@ -215,8 +222,12 @@ app.post('/admin/cargar-afiliados', validarPin, async (req, res) => {
     if (nroExiste.rowCount > 0) return res.status(409).json({ error: 'El N° Afiliado ya existe' });
 
     await client.query('INSERT INTO afiliados (nro_afiliado, nombre_completo, dni) VALUES ($1, $2, $3)', [nro_afiliado, nombre_completo, dni]);
+
     const fecha = new Date().toISOString();
-    await client.query('INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1, $2, $3, $4, $5)', ['Agregar', dni, nombre_completo, nro_afiliado, fecha]);
+    await client.query(
+      'INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1, $2, $3, $4, $5)',
+      ['Agregar', dni, nombre_completo, nro_afiliado, fecha]
+    );
 
     res.json({ success: true, message: 'Afiliado agregado' });
   } catch (err) {
@@ -233,11 +244,17 @@ app.put('/admin/editar-afiliado', validarPin, async (req, res) => {
   dni = dni.trim();
 
   try {
-    const result = await client.query('UPDATE afiliados SET nro_afiliado = $1, nombre_completo = $2 WHERE dni = $3', [nro_afiliado, nombre_completo, dni]);
+    const result = await client.query(
+      'UPDATE afiliados SET nro_afiliado = $1, nombre_completo = $2 WHERE dni = $3',
+      [nro_afiliado, nombre_completo, dni]
+    );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Afiliado no encontrado' });
 
     const fecha = new Date().toISOString();
-    await client.query('INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1, $2, $3, $4, $5)', ['Editar', dni, nombre_completo, nro_afiliado, fecha]);
+    await client.query(
+      'INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1, $2, $3, $4, $5)',
+      ['Editar', dni, nombre_completo, nro_afiliado, fecha]
+    );
 
     res.json({ success: true, message: 'Afiliado modificado' });
   } catch (err) {
@@ -255,8 +272,12 @@ app.post('/admin/eliminar-afiliado', validarPin, async (req, res) => {
 
     const row = result.rows[0];
     await client.query('DELETE FROM afiliados WHERE dni = $1', [dni.trim()]);
+
     const fecha = new Date().toISOString();
-    await client.query('INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1, $2, $3, $4, $5)', ['Eliminar', row.dni, row.nombre_completo, row.nro_afiliado, fecha]);
+    await client.query(
+      'INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1, $2, $3, $4, $5)',
+      ['Eliminar', row.dni, row.nombre_completo, row.nro_afiliado, fecha]
+    );
 
     res.json({ success: true, message: 'Afiliado eliminado' });
   } catch (err) {
