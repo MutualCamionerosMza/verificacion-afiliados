@@ -1,170 +1,250 @@
-// server.js
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-import pg from "pg";
-import fs from "fs";
-import csv from "csv-parser";
-import path from "path";
-
-dotenv.config();
+// server.js - CommonJS
+const express = require("express");
+const cors = require("cors");
+const bodyParser = require("body-parser");
+const { Pool } = require("pg");
+const path = require("path");
+const fs = require("fs");
+const { PDFDocument, rgb, StandardFonts } = require("pdf-lib");
+require('dotenv').config(); // carga .env si no está en producción
 
 const app = express();
-app.use(cors());
-app.use(express.json());
-
-// =============================
-// 🔹 CONFIGURACIÓN GENERAL
-// =============================
 const PORT = process.env.PORT || 8080;
-const isProduction = process.env.RAILWAY_ENVIRONMENT_NAME !== undefined;
 
-console.log(`🚀 Modo: ${isProduction ? "Producción (Railway)" : "Desarrollo (local)"}`);
+const allowedOrigins = [
+  'https://evamendezs.github.io',
+  'https://mutualcamionerosmza.github.io'
+];
 
-// Intentar usar PG_CONNECTION_STRING, y si no existe, DATABASE_URL
-const connectionString =
-  process.env.PG_CONNECTION_STRING ||
-  process.env.DATABASE_URL ||
-  null;
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    else return callback(new Error('CORS no permitido para el origen: ' + origin), false);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'x-admin-pin']
+}));
 
-console.log("🔹 PG_CONNECTION_STRING:", process.env.PG_CONNECTION_STRING);
-console.log("🔹 DATABASE_URL:", process.env.DATABASE_URL);
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
-if (!connectionString) {
-  console.error("❌ ERROR: No se encontró una cadena de conexión válida para PostgreSQL.");
+// --- PostgreSQL ---
+const PG_CONNECTION_STRING = process.env.PG_CONNECTION_STRING || process.env.DATABASE_URL;
+if (!PG_CONNECTION_STRING) {
+  console.error("❌ ERROR: La variable de entorno PG_CONNECTION_STRING no está definida.");
   process.exit(1);
 }
 
-// =============================
-// 🔹 CONEXIÓN A POSTGRESQL
-// =============================
-const pool = new pg.Pool({
-  connectionString,
-  ssl: isProduction ? { rejectUnauthorized: false } : false,
+const pool = new Pool({
+  connectionString: PG_CONNECTION_STRING,
+  ssl: process.env.RAILWAY_ENVIRONMENT_NAME ? { rejectUnauthorized: false } : false
 });
 
 pool.connect()
   .then(() => console.log("✅ Conectado a PostgreSQL"))
-  .catch(err => {
-    console.error("❌ Error conectando a PostgreSQL:", err.message);
-    process.exit(1);
-  });
+  .catch(err => { console.error("❌ Error conectando a PostgreSQL:", err); process.exit(1); });
 
-// =============================
-// 🔹 TABLA DE AFILIADOS
-// =============================
-const crearTabla = async () => {
-  const query = `
+// --- Inicializar tablas ---
+async function inicializarTablas() {
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS afiliados (
       id SERIAL PRIMARY KEY,
-      dni VARCHAR(20) UNIQUE,
-      nombre_completo VARCHAR(100),
-      nro_afiliado VARCHAR(50),
-      categoria VARCHAR(50),
-      empresa VARCHAR(100),
-      fecha_alta DATE
+      nro_afiliado TEXT UNIQUE,
+      nombre_completo TEXT NOT NULL,
+      dni TEXT UNIQUE NOT NULL
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS logs (
+      id SERIAL PRIMARY KEY,
+      accion TEXT,
+      dni TEXT,
+      nombre_completo TEXT,
+      nro_afiliado TEXT,
+      fecha TIMESTAMP
+    )
+  `);
+
+  console.log('🔹 Tablas inicializadas. NO se importará CSV automáticamente.');
+}
+inicializarTablas();
+
+// --- Variables y helpers ---
+const ADMIN_PIN = '1906';
+function validarPin(req, res, next) {
+  const pin = req.headers['x-admin-pin'] || req.body.pin || req.query.pin;
+  if (pin === ADMIN_PIN) next();
+  else res.status(403).json({ error: 'PIN inválido' });
+}
+
+function esNumero(str) {
+  return /^\d+$/.test(str);
+}
+
+// === ENDPOINTS ===
+
+// Endpoint de prueba
+app.get('/ping', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT NOW()');
+    res.json({ db: 'OK', time: result.rows[0].now });
+  } catch (err) {
+    res.status(500).json({ db: 'ERROR', message: err.message });
+  }
+});
+
+// Verificar afiliado
+app.post('/verificar', async (req, res) => {
+  const { dni } = req.body;
+  if (!dni || !esNumero(dni)) return res.status(400).json({ error: 'DNI inválido' });
+
+  try {
+    const result = await pool.query(
+      'SELECT nro_afiliado, nombre_completo, dni FROM afiliados WHERE dni = $1',
+      [dni.trim()]
     );
-  `;
-  await pool.query(query);
-  console.log("🗃️ Tabla 'afiliados' verificada");
-};
-
-crearTabla();
-
-// =============================
-// 🔹 RUTAS PRINCIPALES
-// =============================
-
-// Ruta raíz (para testear conexión)
-app.get("/", (req, res) => {
-  res.send("✅ Servidor y base de datos funcionando correctamente.");
-});
-
-// Verificar afiliado por DNI o nombre
-app.get("/verificar", async (req, res) => {
-  try {
-    const { dni, nombre, apellido } = req.query;
-
-    if (!dni && (!nombre || !apellido)) {
-      return res.status(400).json({ error: "Debe proporcionar DNI o nombre y apellido." });
-    }
-
-    let query, values;
-
-    if (dni) {
-      query = "SELECT * FROM afiliados WHERE dni = $1";
-      values = [dni];
-    } else {
-      query = "SELECT * FROM afiliados WHERE LOWER(nombre_completo) LIKE LOWER($1)";
-      values = [`%${apellido}, ${nombre}%`];
-    }
-
-    const result = await pool.query(query, values);
-
-    if (result.rows.length > 0) {
-      res.json({ afiliado: result.rows[0], mensaje: "Afiliado encontrado ✅" });
-    } else {
-      res.status(404).json({ mensaje: "No se encontró ningún afiliado con esos datos ❌" });
-    }
+    res.json(result.rows.length > 0 ? { afiliado: true, datos: result.rows[0] } : { afiliado: false });
   } catch (err) {
-    console.error("❌ Error en /verificar:", err);
-    res.status(500).json({ error: "Error interno del servidor." });
+    res.status(500).json({ error: 'Error en la base de datos' });
   }
 });
 
-// Agregar afiliado (desde panel admin)
-app.post("/agregar", async (req, res) => {
+// Generar credencial PDF
+app.post('/credencial', async (req, res) => {
+  const { dni } = req.body;
+  if (!dni || !esNumero(dni)) return res.status(400).json({ error: 'DNI inválido' });
+
   try {
-    const { dni, nombre_completo, nro_afiliado, categoria, empresa, fecha_alta } = req.body;
-    if (!dni || !nombre_completo) {
-      return res.status(400).json({ error: "Faltan datos obligatorios." });
-    }
+    const result = await pool.query('SELECT * FROM afiliados WHERE dni = $1', [dni.trim()]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Afiliado no encontrado' });
 
-    const query = `
-      INSERT INTO afiliados (dni, nombre_completo, nro_afiliado, categoria, empresa, fecha_alta)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      ON CONFLICT (dni) DO UPDATE
-      SET nombre_completo = EXCLUDED.nombre_completo,
-          nro_afiliado = EXCLUDED.nro_afiliado,
-          categoria = EXCLUDED.categoria,
-          empresa = EXCLUDED.empresa,
-          fecha_alta = EXCLUDED.fecha_alta;
-    `;
+    const row = result.rows[0];
+    const pdfDoc = await PDFDocument.create();
+    const page = pdfDoc.addPage([400, 300]);
+    const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const blue = rgb(0, 0.3, 0.6);
+    const fecha = new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false });
 
-    await pool.query(query, [dni, nombre_completo, nro_afiliado, categoria, empresa, fecha_alta]);
-    res.json({ mensaje: "Afiliado agregado o actualizado correctamente ✅" });
-  } catch (err) {
-    console.error("❌ Error en /agregar:", err);
-    res.status(500).json({ error: "Error al guardar afiliado." });
+    page.drawText('ASOCIACIÓN MUTUAL CAMIONEROS DE MENDOZA', { x: 20, y: 260, size: 14, font, color: blue });
+    page.drawText(`Nombre: ${row.nombre_completo}`, { x: 20, y: 230, size: 12, font, color: blue });
+    page.drawText(`DNI: ${row.dni}`, { x: 20, y: 210, size: 12, font, color: blue });
+    page.drawText(`N° Afiliado: ${row.nro_afiliado}`, { x: 20, y: 190, size: 12, font, color: blue });
+    page.drawText(`Fecha de solicitud: ${fecha}`, { x: 20, y: 170, size: 10, font, color: blue });
+
+    const logoPath = path.resolve(__dirname, 'assets', 'LogoMutual.png');
+    const logoImage = await pdfDoc.embedPng(fs.readFileSync(logoPath));
+    page.drawImage(logoImage, { x: 75, y: 0, width: 250, height: 200 });
+
+    const pdfBytes = await pdfDoc.save();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename=credencial.pdf');
+    res.send(Buffer.from(pdfBytes));
+  } catch (error) {
+    res.status(500).json({ error: 'Error generando el PDF' });
   }
 });
 
-// Listar afiliados (para panel admin)
-app.get("/listado", async (req, res) => {
+// === ADMIN ENDPOINTS ===
+
+// Agregar afiliado
+app.post('/admin/cargar-afiliados', validarPin, async (req, res) => {
+  let { nro_afiliado, nombre_completo, dni } = req.body;
+  if (!nro_afiliado || !nombre_completo || !dni) return res.status(400).json({ error: 'Faltan datos' });
+
+  nro_afiliado = nro_afiliado.trim();
+  nombre_completo = nombre_completo.trim();
+  dni = dni.trim();
+
+  if (!esNumero(dni) || !esNumero(nro_afiliado)) return res.status(400).json({ error: 'Datos inválidos' });
+
   try {
-    const result = await pool.query("SELECT * FROM afiliados ORDER BY nombre_completo ASC");
-    res.json(result.rows);
+    const dniExiste = await pool.query('SELECT 1 FROM afiliados WHERE dni = $1', [dni]);
+    if (dniExiste.rowCount > 0) return res.status(409).json({ error: 'El DNI ya existe' });
+
+    const nroExiste = await pool.query('SELECT 1 FROM afiliados WHERE nro_afiliado = $1', [nro_afiliado]);
+    if (nroExiste.rowCount > 0) return res.status(409).json({ error: 'El N° Afiliado ya existe' });
+
+    await pool.query('INSERT INTO afiliados (nro_afiliado, nombre_completo, dni) VALUES ($1, $2, $3)',
+      [nro_afiliado, nombre_completo, dni]);
+
+    const fecha = new Date().toISOString();
+    await pool.query(
+      'INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,$5)',
+      ['Agregar', dni, nombre_completo, nro_afiliado, fecha]
+    );
+
+    res.json({ success: true, message: 'Afiliado agregado' });
   } catch (err) {
-    console.error("❌ Error en /listado:", err);
-    res.status(500).json({ error: "Error al obtener el listado." });
+    res.status(500).json({ error: 'Error en la base de datos' });
+  }
+});
+
+// Editar afiliado
+app.put('/admin/editar-afiliado', validarPin, async (req, res) => {
+  let { nro_afiliado, nombre_completo, dni } = req.body;
+  if (!nro_afiliado || !nombre_completo || !dni) return res.status(400).json({ error: 'Faltan datos' });
+
+  nro_afiliado = nro_afiliado.trim();
+  nombre_completo = nombre_completo.trim();
+  dni = dni.trim();
+
+  try {
+    const result = await pool.query(
+      'UPDATE afiliados SET nro_afiliado = $1, nombre_completo = $2 WHERE dni = $3',
+      [nro_afiliado, nombre_completo, dni]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Afiliado no encontrado' });
+
+    const fecha = new Date().toISOString();
+    await pool.query(
+      'INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,$5)',
+      ['Editar', dni, nombre_completo, nro_afiliado, fecha]
+    );
+
+    res.json({ success: true, message: 'Afiliado modificado' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error en la base de datos' });
   }
 });
 
 // Eliminar afiliado
-app.delete("/eliminar/:dni", async (req, res) => {
+app.post('/admin/eliminar-afiliado', validarPin, async (req, res) => {
+  const { dni } = req.body;
+  if (!dni) return res.status(400).json({ error: 'Falta el DNI' });
+
   try {
-    const { dni } = req.params;
-    await pool.query("DELETE FROM afiliados WHERE dni = $1", [dni]);
-    res.json({ mensaje: "Afiliado eliminado correctamente 🗑️" });
+    const result = await pool.query('SELECT * FROM afiliados WHERE dni = $1', [dni.trim()]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Afiliado no encontrado' });
+
+    const row = result.rows[0];
+    await pool.query('DELETE FROM afiliados WHERE dni = $1', [dni.trim()]);
+
+    const fecha = new Date().toISOString();
+    await pool.query(
+      'INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,$5)',
+      ['Eliminar', row.dni, row.nombre_completo, row.nro_afiliado, fecha]
+    );
+
+    res.json({ success: true, message: 'Afiliado eliminado' });
   } catch (err) {
-    console.error("❌ Error en /eliminar:", err);
-    res.status(500).json({ error: "Error al eliminar afiliado." });
+    res.status(500).json({ error: 'Error en la base de datos' });
   }
 });
 
-// =============================
-// 🔹 INICIO DEL SERVIDOR
-// =============================
+// Listar logs
+app.get('/admin/listar-logs', validarPin, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM logs ORDER BY fecha DESC LIMIT 100');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Error al listar logs' });
+  }
+});
+
+// --- Start server ---
 app.listen(PORT, () => {
   console.log(`🚀 Servidor escuchando en http://localhost:${PORT}`);
 });
