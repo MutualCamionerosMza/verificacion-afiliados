@@ -1,5 +1,14 @@
-console.log("PG_CONNECTION_STRING:", process.env.PG_CONNECTION_STRING);
-if (process.env.NODE_ENV !== 'production') require('dotenv').config();
+// =====================
+// 🌐 CONFIGURACIÓN BASE
+// =====================
+if (process.env.NODE_ENV !== 'production') {
+  require('dotenv').config();
+  console.log('🌱 Variables cargadas desde .env (modo desarrollo)');
+} else {
+  console.log('🚀 Modo producción - usando variables de Railway');
+}
+
+console.log('PG_CONNECTION_STRING:', process.env.PG_CONNECTION_STRING);
 
 const express = require('express');
 const cors = require('cors');
@@ -12,6 +21,9 @@ const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// =====================
+// 🔒 CONFIGURAR CORS
+// =====================
 const allowedOrigins = [
   'https://evamendezs.github.io',
   'https://mutualcamionerosmza.github.io'
@@ -34,6 +46,9 @@ app.use(cors({
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
+// =====================
+// 🗄️ CONEXIÓN A POSTGRESQL
+// =====================
 const PG_CONNECTION_STRING = process.env.PG_CONNECTION_STRING;
 
 if (!PG_CONNECTION_STRING) {
@@ -54,6 +69,9 @@ async function conectarPG() {
 }
 conectarPG();
 
+// =====================
+// 🧱 INICIALIZAR TABLAS
+// =====================
 async function inicializarTablas() {
   await client.query(`
     CREATE TABLE IF NOT EXISTS afiliados (
@@ -77,9 +95,11 @@ async function inicializarTablas() {
 
   console.log('🔹 Tablas inicializadas. NO se importará CSV automáticamente.');
 }
-
 inicializarTablas();
 
+// =====================
+// 🔐 VALIDACIÓN ADMIN
+// =====================
 const ADMIN_PIN = '1906';
 
 function validarPin(req, res, next) {
@@ -92,9 +112,11 @@ function esNumero(str) {
   return /^\d+$/.test(str);
 }
 
-// === ENDPOINTS ===
+// =====================
+// 🚀 ENDPOINTS PÚBLICOS
+// =====================
 
-// Endpoint de prueba
+// ✅ Prueba de conexión con la base
 app.get('/ping', async (req, res) => {
   try {
     const result = await client.query('SELECT NOW()');
@@ -104,18 +126,23 @@ app.get('/ping', async (req, res) => {
   }
 });
 
+// 🔍 Verificar afiliado
 app.post('/verificar', async (req, res) => {
   const { dni } = req.body;
   if (!dni || !esNumero(dni)) return res.status(400).json({ error: 'DNI inválido' });
 
   try {
-    const result = await client.query('SELECT nro_afiliado, nombre_completo, dni FROM afiliados WHERE dni = $1', [dni.trim()]);
+    const result = await client.query(
+      'SELECT nro_afiliado, nombre_completo, dni FROM afiliados WHERE dni = $1',
+      [dni.trim()]
+    );
     res.json(result.rows.length > 0 ? { afiliado: true, datos: result.rows[0] } : { afiliado: false });
   } catch (err) {
     res.status(500).json({ error: 'Error en la base de datos' });
   }
 });
 
+// 🎫 Generar credencial PDF
 app.post('/credencial', async (req, res) => {
   const { dni } = req.body;
   if (!dni || !esNumero(dni)) return res.status(400).json({ error: 'DNI inválido' });
@@ -129,7 +156,10 @@ app.post('/credencial', async (req, res) => {
     const page = pdfDoc.addPage([400, 300]);
     const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
     const blue = rgb(0, 0.3, 0.6);
-    const fecha = new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false });
+    const fecha = new Date().toLocaleString('es-AR', {
+      timeZone: 'America/Argentina/Buenos_Aires',
+      hour12: false
+    });
 
     page.drawText('ASOCIACIÓN MUTUAL CAMIONEROS DE MENDOZA', { x: 20, y: 260, size: 14, font, color: blue });
     page.drawText(`Nombre: ${row.nombre_completo}`, { x: 20, y: 230, size: 12, font, color: blue });
@@ -138,8 +168,10 @@ app.post('/credencial', async (req, res) => {
     page.drawText(`Fecha de solicitud: ${fecha}`, { x: 20, y: 170, size: 10, font, color: blue });
 
     const logoPath = path.resolve(__dirname, 'assets', 'LogoMutual.png');
-    const logoImage = await pdfDoc.embedPng(fs.readFileSync(logoPath));
-    page.drawImage(logoImage, { x: 75, y: 0, width: 250, height: 200 });
+    if (fs.existsSync(logoPath)) {
+      const logoImage = await pdfDoc.embedPng(fs.readFileSync(logoPath));
+      page.drawImage(logoImage, { x: 75, y: 0, width: 250, height: 200 });
+    }
 
     const pdfBytes = await pdfDoc.save();
     res.setHeader('Content-Type', 'application/pdf');
@@ -150,8 +182,11 @@ app.post('/credencial', async (req, res) => {
   }
 });
 
-// === ADMIN ENDPOINTS ===
+// =====================
+// 🧭 ENDPOINTS ADMIN
+// =====================
 
+// ➕ Agregar afiliado
 app.post('/admin/cargar-afiliados', validarPin, async (req, res) => {
   let { nro_afiliado, nombre_completo, dni } = req.body;
   if (!nro_afiliado || !nombre_completo || !dni) return res.status(400).json({ error: 'Faltan datos' });
@@ -170,7 +205,10 @@ app.post('/admin/cargar-afiliados', validarPin, async (req, res) => {
     const nroExiste = await client.query('SELECT 1 FROM afiliados WHERE nro_afiliado = $1', [nro_afiliado]);
     if (nroExiste.rowCount > 0) return res.status(409).json({ error: 'El N° Afiliado ya existe' });
 
-    await client.query('INSERT INTO afiliados (nro_afiliado, nombre_completo, dni) VALUES ($1, $2, $3)', [nro_afiliado, nombre_completo, dni]);
+    await client.query(
+      'INSERT INTO afiliados (nro_afiliado, nombre_completo, dni) VALUES ($1, $2, $3)',
+      [nro_afiliado, nombre_completo, dni]
+    );
 
     const fecha = new Date().toISOString();
     await client.query(
@@ -184,6 +222,7 @@ app.post('/admin/cargar-afiliados', validarPin, async (req, res) => {
   }
 });
 
+// ✏️ Editar afiliado
 app.put('/admin/editar-afiliado', validarPin, async (req, res) => {
   let { nro_afiliado, nombre_completo, dni } = req.body;
   if (!nro_afiliado || !nombre_completo || !dni) return res.status(400).json({ error: 'Faltan datos' });
@@ -211,6 +250,7 @@ app.put('/admin/editar-afiliado', validarPin, async (req, res) => {
   }
 });
 
+// 🗑️ Eliminar afiliado
 app.post('/admin/eliminar-afiliado', validarPin, async (req, res) => {
   const { dni } = req.body;
   if (!dni) return res.status(400).json({ error: 'Falta el DNI' });
@@ -234,6 +274,7 @@ app.post('/admin/eliminar-afiliado', validarPin, async (req, res) => {
   }
 });
 
+// 📜 Listar logs
 app.get('/admin/listar-logs', validarPin, async (req, res) => {
   try {
     const result = await client.query('SELECT * FROM logs ORDER BY fecha DESC LIMIT 100');
@@ -243,6 +284,10 @@ app.get('/admin/listar-logs', validarPin, async (req, res) => {
   }
 });
 
+// =====================
+// 🟢 INICIAR SERVIDOR
+// =====================
 app.listen(PORT, () => {
   console.log(`🚀 Servidor escuchando en http://localhost:${PORT}`);
 });
+
