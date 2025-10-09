@@ -12,35 +12,31 @@ const csv = require('csv-parser');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// =======================
-// CORS
-// =======================
+// --- CORS ---
 const allowedOrigins = [
   'https://evamendezs.github.io',
   'https://mutualcamionerosmza.github.io'
 ];
 
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true); // Postman o curl
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true); // permite postman o curl
     if (allowedOrigins.includes(origin)) return callback(null, true);
-    callback(new Error('CORS no permitido para el origen: ' + origin));
+    else return callback(new Error('CORS no permitido para el origen: ' + origin));
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'x-admin-pin']
+  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','x-admin-pin']
 }));
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// =======================
-// PostgreSQL
-// =======================
+// --- PostgreSQL ---
 const PG_CONNECTION_STRING = process.env.PG_CONNECTION_STRING;
 
 if (!PG_CONNECTION_STRING) {
-  console.error("❌ ERROR: La variable PG_CONNECTION_STRING no está definida.");
+  console.error("❌ ERROR: La variable de entorno PG_CONNECTION_STRING no está definida.");
   process.exit(1);
 }
 
@@ -57,9 +53,7 @@ async function conectarPG() {
 }
 conectarPG();
 
-// =======================
-// Inicializar tablas y CSV
-// =======================
+// --- Inicialización de tablas y datos ---
 async function inicializarTablasYDatos() {
   await client.query(`
     CREATE TABLE IF NOT EXISTS afiliados (
@@ -94,12 +88,14 @@ async function importarCSV() {
   return new Promise((resolve, reject) => {
     const filas = [];
     fs.createReadStream(path.resolve(__dirname, 'afiliados.csv'))
-      .pipe(csv({ mapHeaders: ({ index }) => {
-        if (index === 0) return 'nro_afiliado';
-        if (index === 1) return 'nombre_completo';
-        if (index === 2) return 'dni';
-        return null;
-      }}))
+      .pipe(csv({
+        mapHeaders: ({ header, index }) => {
+          if (index === 0) return 'nro_afiliado';
+          if (index === 1) return 'nombre_completo';
+          if (index === 2) return 'dni';
+          return null;
+        }
+      }))
       .on('data', (data) => {
         if (data.nro_afiliado && data.nombre_completo && data.dni) {
           filas.push({
@@ -133,9 +129,7 @@ async function importarCSV() {
 
 inicializarTablasYDatos();
 
-// =======================
-// PIN administrador
-// =======================
+// --- Configuración del PIN ---
 const ADMIN_PIN = '1906';
 function validarPin(req, res, next) {
   const pin = req.headers['x-admin-pin'] || req.body.pin || req.query.pin;
@@ -147,9 +141,7 @@ function esNumero(str) {
   return /^\d+$/.test(str);
 }
 
-// =======================
-// RUTAS
-// =======================
+// === RUTAS ===
 
 // Verificar afiliado
 app.post('/verificar', async (req, res) => {
@@ -157,16 +149,14 @@ app.post('/verificar', async (req, res) => {
   if (!dni || !esNumero(dni)) return res.status(400).json({ error: 'DNI inválido' });
 
   try {
-    const result = await client.query(
-      'SELECT nro_afiliado, nombre_completo, dni FROM afiliados WHERE dni = $1', [dni.trim()]
-    );
+    const result = await client.query('SELECT nro_afiliado, nombre_completo, dni FROM afiliados WHERE dni = $1', [dni.trim()]);
     res.json(result.rows.length > 0 ? { afiliado: true, datos: result.rows[0] } : { afiliado: false });
   } catch (err) {
     res.status(500).json({ error: 'Error en la base de datos' });
   }
 });
 
-// Generar PDF credencial
+// Generar credencial PDF
 app.post('/credencial', async (req, res) => {
   const { dni } = req.body;
   if (!dni || !esNumero(dni)) return res.status(400).json({ error: 'DNI inválido' });
@@ -189,10 +179,8 @@ app.post('/credencial', async (req, res) => {
     page.drawText(`Fecha de solicitud: ${fecha}`, { x: 20, y: 170, size: 10, font, color: blue });
 
     const logoPath = path.resolve(__dirname, 'assets', 'LogoMutual.png');
-    if (fs.existsSync(logoPath)) {
-      const logoImage = await pdfDoc.embedPng(fs.readFileSync(logoPath));
-      page.drawImage(logoImage, { x: 75, y: 0, width: 250, height: 200 });
-    }
+    const logoImage = await pdfDoc.embedPng(fs.readFileSync(logoPath));
+    page.drawImage(logoImage, { x: 75, y: 0, width: 250, height: 200 });
 
     const pdfBytes = await pdfDoc.save();
     res.setHeader('Content-Type', 'application/pdf');
@@ -203,11 +191,7 @@ app.post('/credencial', async (req, res) => {
   }
 });
 
-// =======================
-// ADMIN - CRUD
-// =======================
-
-// Agregar afiliado
+// --- Rutas admin ---
 app.post('/admin/cargar-afiliados', validarPin, async (req, res) => {
   let { nro_afiliado, nombre_completo, dni } = req.body;
   if (!nro_afiliado || !nombre_completo || !dni) return res.status(400).json({ error: 'Faltan datos' });
@@ -227,81 +211,38 @@ app.post('/admin/cargar-afiliados', validarPin, async (req, res) => {
     if (nroExiste.rowCount > 0) return res.status(409).json({ error: 'El N° Afiliado ya existe' });
 
     await client.query('INSERT INTO afiliados (nro_afiliado, nombre_completo, dni) VALUES ($1, $2, $3)', [nro_afiliado, nombre_completo, dni]);
+    await client.query('INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())', ['Agregar', dni, nombre_completo, nro_afiliado]);
 
-    const fecha = new Date().toISOString();
-    await client.query(
-      'INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1, $2, $3, $4, $5)',
-      ['Agregar', dni, nombre_completo, nro_afiliado, fecha]
-    );
-
-    res.json({ success: true, message: 'Afiliado agregado' });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: 'Error en la base de datos' });
   }
 });
 
-// Editar afiliado
-app.put('/admin/editar-afiliado', validarPin, async (req, res) => {
-  let { nro_afiliado, nombre_completo, dni } = req.body;
-  if (!nro_afiliado || !nombre_completo || !dni) return res.status(400).json({ error: 'Faltan datos' });
-
-  nro_afiliado = nro_afiliado.trim();
-  nombre_completo = nombre_completo.trim();
-  dni = dni.trim();
-
-  try {
-    const result = await client.query(
-      'UPDATE afiliados SET nro_afiliado = $1, nombre_completo = $2 WHERE dni = $3',
-      [nro_afiliado, nombre_completo, dni]
-    );
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Afiliado no encontrado' });
-
-    const fecha = new Date().toISOString();
-    await client.query(
-      'INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1, $2, $3, $4, $5)',
-      ['Editar', dni, nombre_completo, nro_afiliado, fecha]
-    );
-
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: 'Error en la base de datos' });
-  }
-});
-
-// Eliminar afiliado
-app.post('/admin/eliminar-afiliado', validarPin, async (req, res) => {
-  const { dni } = req.body;
-  if (!dni || !esNumero(dni)) return res.status(400).json({ error: 'DNI inválido' });
-
-  try {
-    const result = await client.query('DELETE FROM afiliados WHERE dni = $1 RETURNING *', [dni]);
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Afiliado no encontrado' });
-
-    const fecha = new Date().toISOString();
-    await client.query(
-      'INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1, $2, $3, $4, $5)',
-      ['Eliminar', dni, result.rows[0].nombre_completo, result.rows[0].nro_afiliado, fecha]
-    );
-
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: 'Error en la base de datos' });
-  }
-});
-
-// Listar logs
 app.get('/admin/listar-logs', validarPin, async (req, res) => {
   try {
-    const result = await client.query('SELECT * FROM logs ORDER BY fecha DESC LIMIT 100');
+    const result = await client.query('SELECT * FROM logs ORDER BY fecha DESC');
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: 'Error en la base de datos' });
   }
 });
 
-// =======================
-// SERVIDOR
-// =======================
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor escuchando en http://localhost:${PORT} (PORT env: ${PORT})`);
+app.post('/admin/eliminar-afiliado', validarPin, async (req, res) => {
+  const { dni } = req.body;
+  if (!dni) return res.status(400).json({ error: 'Falta DNI' });
+
+  try {
+    const result = await client.query('DELETE FROM afiliados WHERE dni = $1 RETURNING *', [dni]);
+    if (result.rowCount > 0) {
+      await client.query('INSERT INTO logs (accion,dni,nombre_completo,nro_afiliado,fecha) VALUES ($1,$2,$3,$4,NOW())',
+        ['Eliminar', dni, '', '']);
+      res.json({ ok: true });
+    } else res.status(404).json({ error: 'Afiliado no encontrado' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error en la base de datos' });
+  }
 });
+
+// --- Servidor ---
+app.listen(PORT, () => console.log(`🚀 Servidor escuchando en http://localhost:${PORT} (PORT env: ${PORT})`));
