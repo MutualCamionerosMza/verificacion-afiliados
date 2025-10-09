@@ -12,7 +12,6 @@ const csv = require('csv-parser');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// === CORS ===
 const allowedOrigins = [
   'https://evamendezs.github.io',
   'https://mutualcamionerosmza.github.io'
@@ -28,12 +27,9 @@ app.use(cors({
     }
   },
   credentials: true,
-  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','x-admin-pin']
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'x-admin-pin']
 }));
-
-// Manejar preflight requests
-app.options('*', cors());
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -57,7 +53,6 @@ async function conectarPG() {
 }
 conectarPG();
 
-// === Tablas e importación CSV ===
 async function inicializarTablasYDatos() {
   await client.query(`
     CREATE TABLE IF NOT EXISTS afiliados (
@@ -133,8 +128,8 @@ async function importarCSV() {
 
 inicializarTablasYDatos();
 
-// === Funciones ===
 const ADMIN_PIN = '1906';
+
 function validarPin(req, res, next) {
   const pin = req.headers['x-admin-pin'] || req.body.pin || req.query.pin;
   if (pin === ADMIN_PIN) next();
@@ -146,8 +141,6 @@ function esNumero(str) {
 }
 
 // === RUTAS ===
-
-// Verificar afiliado
 app.post('/verificar', async (req, res) => {
   const { dni } = req.body;
   if (!dni || !esNumero(dni)) return res.status(400).json({ error: 'DNI inválido' });
@@ -160,7 +153,6 @@ app.post('/verificar', async (req, res) => {
   }
 });
 
-// Generar credencial PDF
 app.post('/credencial', async (req, res) => {
   const { dni } = req.body;
   if (!dni || !esNumero(dni)) return res.status(400).json({ error: 'DNI inválido' });
@@ -195,7 +187,7 @@ app.post('/credencial', async (req, res) => {
   }
 });
 
-// === Rutas Admin con PIN ===
+// ADMIN
 app.post('/admin/cargar-afiliados', validarPin, async (req, res) => {
   let { nro_afiliado, nombre_completo, dni } = req.body;
   if (!nro_afiliado || !nombre_completo || !dni) return res.status(400).json({ error: 'Faltan datos' });
@@ -287,7 +279,6 @@ app.get('/admin/listar-logs', validarPin, async (req, res) => {
   }
 });
 
-// === Servidor ===
 app.listen(PORT, () => {
   console.log(`🚀 Servidor escuchando en http://localhost:${PORT}`);
 });
