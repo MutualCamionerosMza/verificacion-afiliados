@@ -20,12 +20,8 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Permite requests sin origin (ej. Postman)
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('CORS no permitido'));
-    }
+    if (!origin || allowedOrigins.includes(origin)) callback(null, true);
+    else callback(new Error('CORS no permitido'));
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'x-admin-pin'],
@@ -55,7 +51,7 @@ async function conectarPG() {
 }
 conectarPG();
 
-// === Inicialización de tablas y CSV ===
+// === Inicialización de tablas ===
 async function inicializarTablasYDatos() {
   await client.query(`
     CREATE TABLE IF NOT EXISTS afiliados (
@@ -151,7 +147,7 @@ app.post('/verificar', async (req, res) => {
   try {
     const result = await client.query('SELECT nro_afiliado, nombre_completo, dni FROM afiliados WHERE dni = $1', [dni.trim()]);
     res.json(result.rows.length > 0 ? { afiliado: true, datos: result.rows[0] } : { afiliado: false });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Error en la base de datos' });
   }
 });
@@ -185,7 +181,7 @@ app.post('/credencial', async (req, res) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename=credencial.pdf');
     res.send(Buffer.from(pdfBytes));
-  } catch (error) {
+  } catch {
     res.status(500).json({ error: 'Error generando el PDF' });
   }
 });
@@ -218,11 +214,37 @@ app.post('/admin/cargar-afiliados', validarPin, async (req, res) => {
     );
 
     res.json({ success: true, message: 'Afiliado agregado' });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Error en la base de datos' });
   }
 });
 
+app.get('/admin/listar-logs', validarPin, async (req, res) => {
+  try {
+    const result = await client.query('SELECT * FROM logs ORDER BY fecha DESC LIMIT 50');
+    res.json(result.rows);
+  } catch {
+    res.status(500).json({ error: 'Error obteniendo logs' });
+  }
+});
+
+app.delete('/admin/eliminar-afiliado', validarPin, async (req, res) => {
+  const { dni } = req.body;
+  if (!dni || !esNumero(dni)) return res.status(400).json({ error: 'DNI inválido' });
+
+  try {
+    const result = await client.query('DELETE FROM afiliados WHERE dni = $1', [dni]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Afiliado no encontrado' });
+
+    const fecha = new Date().toISOString();
+    await client.query('INSERT INTO logs (accion, dni, fecha) VALUES ($1, $2, $3)', ['Eliminar', dni, fecha]);
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: 'Error al eliminar afiliado' });
+  }
+});
+
+// === Servidor ===
 app.listen(PORT, () => {
   console.log(`🚀 Servidor escuchando en http://localhost:${PORT}`);
 });
