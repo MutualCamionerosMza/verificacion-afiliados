@@ -1,3 +1,4 @@
+// server.js
 import express from 'express';
 import cors from 'cors';
 import bodyParser from 'body-parser';
@@ -8,28 +9,31 @@ import PDFDocument from 'pdfkit';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
-// --- Configuración CORS correcta ---
+// --- CORS ---
 app.use(cors({
   origin: 'https://mutualcamionerosmza.github.io',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET','POST','PUT','DELETE'],
   allowedHeaders: ['Content-Type', 'x-admin-pin']
 }));
 
-// --- Para que Express entienda JSON ---
+// --- Body parser ---
 app.use(bodyParser.json());
 
-// --- Conexión PostgreSQL ---
+// --- PostgreSQL ---
 const pool = new Pool({
   connectionString: process.env.PG_CONNECTION_STRING,
-  ssl: { rejectUnauthorized: false }
+  ssl: {
+    rejectUnauthorized: false
+  }
 });
 
-// --- Middleware para manejar preflight requests OPTIONS ---
-app.options('*', cors());
+pool.connect()
+  .then(() => console.log('✅ Conectado a PostgreSQL'))
+  .catch(err => console.error('❌ Error al conectar con PostgreSQL:', err));
 
-// --- Rutas ---
+// --- Endpoints ---
 
 // Verificar afiliado
 app.post('/verificar', async (req, res) => {
@@ -55,11 +59,18 @@ app.post('/credencial', async (req, res) => {
     if (result.rows.length === 0) return res.status(404).send('No se encontró afiliado');
 
     const afiliado = result.rows[0];
-    const doc = new PDFDocument();
+
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=credencial-${dni}.pdf`);
-    doc.text(`Credencial de Afiliado\n\nNombre: ${afiliado.nombre_completo}\nDNI: ${afiliado.dni}\nN° Afiliado: ${afiliado.nro_afiliado}`);
+
+    doc.text(`Credencial de Afiliado`, { align: 'center', underline: true });
+    doc.moveDown();
+    doc.text(`Nombre: ${afiliado.nombre_completo}`);
+    doc.text(`DNI: ${afiliado.dni}`);
+    doc.text(`N° Afiliado: ${afiliado.nro_afiliado}`);
     doc.end();
+
     doc.pipe(res);
   } catch (err) {
     console.error(err);
@@ -67,7 +78,7 @@ app.post('/credencial', async (req, res) => {
   }
 });
 
-// --- Resto de rutas de admin (igual que antes) ---
+// --- Admin ---
 const ADMIN_PIN = '1906';
 
 function validarPin(req, res, next) {
@@ -80,8 +91,8 @@ function validarPin(req, res, next) {
 app.post('/admin/cargar-afiliados', validarPin, async (req, res) => {
   const { dni, nombre_completo, nro_afiliado } = req.body;
   try {
-    await pool.query('INSERT INTO afiliados (dni,nombre_completo,nro_afiliado) VALUES ($1,$2,$3)', [dni, nombre_completo, nro_afiliado]);
-    await pool.query('INSERT INTO logs (accion,dni,nombre_completo,nro_afiliado,fecha) VALUES ($1,$2,$3,$4,NOW())', ['Agregar', dni, nombre_completo, nro_afiliado]);
+    await pool.query('INSERT INTO afiliados (dni, nombre_completo, nro_afiliado) VALUES ($1,$2,$3)', [dni, nombre_completo, nro_afiliado]);
+    await pool.query('INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())', ['Agregar', dni, nombre_completo, nro_afiliado]);
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -94,7 +105,7 @@ app.put('/admin/editar-afiliado', validarPin, async (req, res) => {
   const { dni, nombre_completo, nro_afiliado } = req.body;
   try {
     await pool.query('UPDATE afiliados SET nombre_completo=$1, nro_afiliado=$2 WHERE dni=$3', [nombre_completo, nro_afiliado, dni]);
-    await pool.query('INSERT INTO logs (accion,dni,nombre_completo,nro_afiliado,fecha) VALUES ($1,$2,$3,$4,NOW())', ['Editar', dni, nombre_completo, nro_afiliado]);
+    await pool.query('INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())', ['Editar', dni, nombre_completo, nro_afiliado]);
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -110,7 +121,7 @@ app.post('/admin/eliminar-afiliado', validarPin, async (req, res) => {
     if (result.rows.length === 0) return res.json({ success: false, error: 'Afiliado no encontrado' });
     const afiliado = result.rows[0];
     await pool.query('DELETE FROM afiliados WHERE dni=$1', [dni]);
-    await pool.query('INSERT INTO logs (accion,dni,nombre_completo,nro_afiliado,fecha) VALUES ($1,$2,$3,$4,NOW())', ['Eliminar', dni, afiliado.nombre_completo, afiliado.nro_afiliado]);
+    await pool.query('INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())', ['Eliminar', dni, afiliado.nombre_completo, afiliado.nro_afiliado]);
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -131,5 +142,5 @@ app.get('/admin/listar-logs', validarPin, async (req, res) => {
 
 // --- Iniciar servidor ---
 app.listen(PORT, () => {
-  console.log(`Servidor escuchando en puerto ${PORT}`);
+  console.log(`🚀 Servidor escuchando en puerto ${PORT}`);
 });
