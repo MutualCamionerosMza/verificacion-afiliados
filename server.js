@@ -1,4 +1,3 @@
-// server.js
 import express from 'express';
 import cors from 'cors';
 import bodyParser from 'body-parser';
@@ -60,15 +59,13 @@ app.get('/credencial', async (req, res) => {
     if (result.rows.length === 0) return res.status(404).send('No se encontró afiliado');
 
     const afiliado = result.rows[0];
-
     const doc = new PDFDocument({ size: 'A4', margin: 50 });
-    
+
     // Configurar headers
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=credencial-${dni}.pdf`);
 
-    // Logo (ajusta la ruta si lo tienes local)
-    const logoUrl = 'https://i.imgur.com/ZXJvT6b.png';
+    doc.pipe(res); // pipe antes de doc.end()
 
     // Título
     doc.fillColor('#003366').fontSize(28).text('CREDENCIAL DE AFILIADO', { align: 'center' });
@@ -81,17 +78,15 @@ app.get('/credencial', async (req, res) => {
     doc.text(`N° Afiliado: ${afiliado.nro_afiliado}`);
     doc.moveDown();
 
-    // Logo
-    const logoPath = path.join('/tmp', 'logo.png');
-    // Descargar el logo temporalmente
-    const fetch = (await import('node-fetch')).default;
-    const response = await fetch(logoUrl);
-    const buffer = await response.arrayBuffer();
-    fs.writeFileSync(logoPath, Buffer.from(buffer));
-    doc.image(logoPath, { fit: [150, 150], align: 'center' });
+    // Logo local
+    const logoPath = path.join(process.cwd(), 'assets', 'logo.png');
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, { fit: [150, 150], align: 'center' });
+    } else {
+      console.warn('⚠️ Logo no encontrado en assets/logo.png');
+    }
 
     doc.end();
-    doc.pipe(res);
 
   } catch (error) {
     console.error('Error generando credencial:', error);
