@@ -1,5 +1,6 @@
 // server.js
 import express from 'express';
+import cors from 'cors';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
 import { Pool } from 'pg';
@@ -10,29 +11,21 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// --- CORS para tu frontend ---
+app.use(cors({
+  origin: 'https://mutualcamionerosmza.github.io',
+  methods: ['GET','POST','PUT','DELETE'],
+  allowedHeaders: ['Content-Type', 'x-admin-pin']
+}));
+
 // --- Body parser ---
 app.use(bodyParser.json());
-
-// --- CORS global (soluciona tu error en el navegador) ---
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', 'https://mutualcamionerosmza.github.io'); // tu frontend
-  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, x-admin-pin');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200); // responde preflight inmediatamente
-  }
-  next();
-});
 
 // --- Conexión a PostgreSQL ---
 const pool = new Pool({
   connectionString: process.env.PG_CONNECTION_STRING,
   ssl: { rejectUnauthorized: false }
 });
-
-pool.connect()
-  .then(() => console.log('✅ Conectado a PostgreSQL'))
-  .catch(err => console.error('❌ Error al conectar con PostgreSQL:', err));
 
 // --- Rutas ---
 
@@ -52,7 +45,7 @@ app.post('/verificar', async (req, res) => {
   }
 });
 
-// Generar credencial PDF
+// Generar credencial PDF con diseño original
 app.post('/credencial', async (req, res) => {
   const { dni } = req.body;
   try {
@@ -60,12 +53,33 @@ app.post('/credencial', async (req, res) => {
     if (result.rows.length === 0) return res.status(404).send('No se encontró afiliado');
 
     const afiliado = result.rows[0];
-    const doc = new PDFDocument();
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename=credencial-${dni}.pdf`);
-    doc.text(`Credencial de Afiliado\n\nNombre: ${afiliado.nombre_completo}\nDNI: ${afiliado.dni}\nN° Afiliado: ${afiliado.nro_afiliado}`);
-    doc.pipe(res);
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    let buffers = [];
+    doc.on('data', buffers.push.bind(buffers));
+    doc.on('end', () => {
+      const pdfData = Buffer.concat(buffers);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename=credencial-${dni}.pdf`);
+      res.send(pdfData);
+    });
+
+    // --- DISEÑO ---
+    doc.rect(0, 0, doc.page.width, doc.page.height).fill('#e6e6e6'); // fondo
+    doc.fillColor('#003366');
+    doc.fontSize(24).text('CREDENCIAL DE AFILIADO', { align: 'center', underline: true });
+    doc.moveDown(2);
+
+    doc.fillColor('#000000');
+    doc.fontSize(18).text(`Nombre: ${afiliado.nombre_completo}`);
+    doc.text(`DNI: ${afiliado.dni}`);
+    doc.text(`N° Afiliado: ${afiliado.nro_afiliado}`);
+    doc.moveDown(2);
+
+    // Logo (puedes cambiar la URL por tu logo oficial)
+    doc.image('https://i.imgur.com/ZXJvT6b.png', doc.page.width/2 - 75, doc.y, { width: 150 });
+
     doc.end();
+
   } catch (error) {
     console.error(error);
     res.status(500).send('Error generando credencial');
@@ -74,8 +88,6 @@ app.post('/credencial', async (req, res) => {
 
 // --- Rutas admin ---
 const ADMIN_PIN = '1906';
-
-// Middleware de validación de PIN
 function validarPin(req, res, next) {
   const pin = req.headers['x-admin-pin'];
   if (pin === ADMIN_PIN) return next();
@@ -86,14 +98,8 @@ function validarPin(req, res, next) {
 app.post('/admin/cargar-afiliados', validarPin, async (req, res) => {
   const { dni, nombre_completo, nro_afiliado } = req.body;
   try {
-    await pool.query(
-      'INSERT INTO afiliados (dni, nombre_completo, nro_afiliado) VALUES ($1,$2,$3)',
-      [dni, nombre_completo, nro_afiliado]
-    );
-    await pool.query(
-      'INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())',
-      ['Agregar', dni, nombre_completo, nro_afiliado]
-    );
+    await pool.query('INSERT INTO afiliados (dni, nombre_completo, nro_afiliado) VALUES ($1,$2,$3)', [dni, nombre_completo, nro_afiliado]);
+    await pool.query('INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())', ['Agregar', dni, nombre_completo, nro_afiliado]);
     res.json({ success: true });
   } catch (error) {
     console.error(error);
@@ -105,14 +111,8 @@ app.post('/admin/cargar-afiliados', validarPin, async (req, res) => {
 app.put('/admin/editar-afiliado', validarPin, async (req, res) => {
   const { dni, nombre_completo, nro_afiliado } = req.body;
   try {
-    await pool.query(
-      'UPDATE afiliados SET nombre_completo=$1, nro_afiliado=$2 WHERE dni=$3',
-      [nombre_completo, nro_afiliado, dni]
-    );
-    await pool.query(
-      'INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())',
-      ['Editar', dni, nombre_completo, nro_afiliado]
-    );
+    await pool.query('UPDATE afiliados SET nombre_completo=$1, nro_afiliado=$2 WHERE dni=$3', [nombre_completo, nro_afiliado, dni]);
+    await pool.query('INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())', ['Editar', dni, nombre_completo, nro_afiliado]);
     res.json({ success: true });
   } catch (error) {
     console.error(error);
@@ -128,10 +128,7 @@ app.post('/admin/eliminar-afiliado', validarPin, async (req, res) => {
     if (result.rows.length === 0) return res.json({ success: false, error: 'Afiliado no encontrado' });
     const afiliado = result.rows[0];
     await pool.query('DELETE FROM afiliados WHERE dni=$1', [dni]);
-    await pool.query(
-      'INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())',
-      ['Eliminar', dni, afiliado.nombre_completo, afiliado.nro_afiliado]
-    );
+    await pool.query('INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())', ['Eliminar', dni, afiliado.nombre_completo, afiliado.nro_afiliado]);
     res.json({ success: true });
   } catch (error) {
     console.error(error);
@@ -152,5 +149,5 @@ app.get('/admin/listar-logs', validarPin, async (req, res) => {
 
 // --- Iniciar servidor ---
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor escuchando en puerto ${PORT}`);
+  console.log(`Servidor corriendo en puerto ${PORT}`);
 });
