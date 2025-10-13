@@ -19,7 +19,7 @@ const corsOptions = {
   optionsSuccessStatus: 200,
 };
 app.use(cors(corsOptions));
-app.options("*", cors(corsOptions)); // ✅ Manejo de preflight
+app.options("*", cors());// ✅ Manejo de preflight
 
 app.use(express.json());
 
