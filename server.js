@@ -49,7 +49,7 @@ app.post('/verificar', async (req, res) => {
   }
 });
 
-// Generar credencial PDF (GET con query)
+// --- Credencial premium ---
 app.get('/credencial', async (req, res) => {
   const { dni } = req.query;
   if (!dni) return res.status(400).send('Falta el DNI');
@@ -59,32 +59,62 @@ app.get('/credencial', async (req, res) => {
     if (result.rows.length === 0) return res.status(404).send('No se encontró afiliado');
 
     const afiliado = result.rows[0];
-    const doc = new PDFDocument({ size: 'A4', margin: 50 });
 
-    // Configurar headers
+    // Tamaño tarjeta: 85mm x 55mm
+    const mmToPoints = mm => mm * 2.83465;
+    const width = mmToPoints(85);
+    const height = mmToPoints(55);
+
+    const doc = new PDFDocument({ size: [width, height], margins: { top: 5, bottom: 5, left: 5, right: 5 } });
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=credencial-${dni}.pdf`);
+    doc.pipe(res);
 
-    doc.pipe(res); // pipe antes de doc.end()
+    // Fondo degradado
+    const gradientHeight = height;
+    for (let i = 0; i < gradientHeight; i++) {
+      const colorVal = Math.floor(230 - i * 0.8);
+      doc.rect(0, i, width, 1).fill(`rgb(${colorVal},${colorVal},${colorVal})`);
+    }
 
-    // Título
-    doc.fillColor('#003366').fontSize(28).text('CREDENCIAL DE AFILIADO', { align: 'center' });
-    doc.moveDown();
+    // Bordes redondeados
+    const radius = 10;
+    doc.roundedRect(0, 0, width, height, radius).stroke('#003366');
 
-    // Datos
-    doc.fillColor('black').fontSize(18);
-    doc.text(`Nombre: ${afiliado.nombre_completo}`);
-    doc.text(`DNI: ${afiliado.dni}`);
-    doc.text(`N° Afiliado: ${afiliado.nro_afiliado}`);
-    doc.moveDown();
-
-    // Logo local
+    // Logo centrado y grande
     const logoPath = path.join(process.cwd(), 'assets', 'logo.png');
     if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, { fit: [150, 150], align: 'center' });
-    } else {
-      console.warn('⚠️ Logo no encontrado en assets/logo.png');
+      const logoWidth = width * 0.6;
+      const logoHeight = height * 0.25;
+      const logoX = (width - logoWidth) / 2;
+      doc.image(logoPath, logoX, 5, { width: logoWidth, height: logoHeight });
     }
+
+    // Título
+    doc.fillColor('#003366')
+       .font('Helvetica-Bold')
+       .fontSize(10)
+       .text('CREDENCIAL DE AFILIADO', 0, height * 0.32, { align: 'center' });
+
+    // Datos del afiliado
+    doc.moveDown(0.3)
+       .font('Helvetica')
+       .fontSize(8.5)
+       .fillColor('black')
+       .text(`Nombre: ${afiliado.nombre_completo}`, { align: 'center' })
+       .text(`DNI: ${afiliado.dni}`, { align: 'center' })
+       .text(`N° Afiliado: ${afiliado.nro_afiliado}`, { align: 'center' });
+
+    // Fecha y hora 24 hs
+    const fecha = new Date();
+    const fechaStr = fecha.toLocaleDateString('es-AR') + ' ' +
+                     fecha.getHours().toString().padStart(2, '0') + ':' +
+                     fecha.getMinutes().toString().padStart(2, '0');
+    doc.moveDown(0.3)
+       .fontSize(7)
+       .fillColor('#555555')
+       .text(`Emitido: ${fechaStr}`, { align: 'center' });
 
     doc.end();
 
