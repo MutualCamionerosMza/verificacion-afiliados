@@ -144,8 +144,8 @@ app.get("/credencial", async (req, res) => {
       const tempDoc = new PDFDocument({ autoFirstPage: false });
       const img = doc.openImage(image);
 
-      const logoMaxWidth = width * 0.35 * 1.2;
-      const logoMaxHeight = height * 0.25 * 1.2;
+      const logoMaxWidth = width * 0.35 * 1.4;
+      const logoMaxHeight = height * 0.25 * 1.4;
       let logoWidth = img.width;
       let logoHeight = img.height;
 
