@@ -1,38 +1,41 @@
+// server.js
 import express from 'express';
 import cors from 'cors';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
-import pkg from 'pg';
+import { Pool } from 'pg';
 import PDFDocument from 'pdfkit';
-
-const { Pool } = pkg;
 
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 
-// --- CORS ---
+// --- CORS para permitir tu frontend ---
 app.use(cors({
   origin: 'https://mutualcamionerosmza.github.io',
-  methods: ['GET','POST','PUT','DELETE'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'x-admin-pin']
 }));
+
+// Permitir preflight OPTIONS para POST
+app.options('*', cors());
 
 // --- Body parser ---
 app.use(bodyParser.json());
 
-// --- PostgreSQL ---
+// --- Conexión a PostgreSQL ---
 const pool = new Pool({
   connectionString: process.env.PG_CONNECTION_STRING,
   ssl: { rejectUnauthorized: false }
 });
 
 pool.connect()
-  .then(() => console.log('✅ Conexión a PostgreSQL exitosa'))
+  .then(() => console.log('✅ Conectado a PostgreSQL'))
   .catch(err => console.error('❌ Error al conectar con PostgreSQL:', err));
 
 // --- Rutas ---
+
 // Verificar afiliado
 app.post('/verificar', async (req, res) => {
   const { dni } = req.body;
@@ -57,8 +60,8 @@ app.post('/credencial', async (req, res) => {
     if (result.rows.length === 0) return res.status(404).send('No se encontró afiliado');
 
     const afiliado = result.rows[0];
-
     const doc = new PDFDocument();
+    
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=credencial-${dni}.pdf`);
 
@@ -71,8 +74,9 @@ app.post('/credencial', async (req, res) => {
   }
 });
 
-// --- Admin ---
+// --- Rutas admin ---
 const ADMIN_PIN = '1906';
+
 function validarPin(req, res, next) {
   const pin = req.headers['x-admin-pin'];
   if (pin === ADMIN_PIN) return next();
@@ -132,7 +136,8 @@ app.get('/admin/listar-logs', validarPin, async (req, res) => {
   }
 });
 
-// --- Servidor ---
+// --- Iniciar servidor ---
 app.listen(PORT, () => {
   console.log(`🚀 Servidor escuchando en puerto ${PORT}`);
 });
+
