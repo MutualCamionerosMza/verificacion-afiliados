@@ -49,7 +49,7 @@ app.post('/verificar', async (req, res) => {
   }
 });
 
-// --- Credencial premium ---
+// --- Credencial tamaño medio hoja A4 ---
 app.get('/credencial', async (req, res) => {
   const { dni } = req.query;
   if (!dni) return res.status(400).send('Falta el DNI');
@@ -60,47 +60,34 @@ app.get('/credencial', async (req, res) => {
 
     const afiliado = result.rows[0];
 
-    // Tamaño tarjeta: 85mm x 55mm
+    // Tamaño: 140mm x 85mm
     const mmToPoints = mm => mm * 2.83465;
-    const width = mmToPoints(85);
-    const height = mmToPoints(55);
+    const width = mmToPoints(140);
+    const height = mmToPoints(85);
 
-    const doc = new PDFDocument({ size: [width, height], margins: { top: 5, bottom: 5, left: 5, right: 5 } });
+    const doc = new PDFDocument({ size: [width, height], margins: { top: 10, bottom: 10, left: 10, right: 10 } });
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=credencial-${dni}.pdf`);
     doc.pipe(res);
 
-    // Fondo degradado
-    const gradientHeight = height;
-    for (let i = 0; i < gradientHeight; i++) {
-      const colorVal = Math.floor(230 - i * 0.8);
-      doc.rect(0, i, width, 1).fill(`rgb(${colorVal},${colorVal},${colorVal})`);
-    }
+    // Fondo blanco
+    doc.rect(0, 0, width, height).fill('#ffffff');
 
     // Bordes redondeados
-    const radius = 10;
+    const radius = 12;
     doc.roundedRect(0, 0, width, height, radius).stroke('#003366');
 
-    // Logo centrado y grande
-    const logoPath = path.join(process.cwd(), 'assets', 'logo.png');
-    if (fs.existsSync(logoPath)) {
-      const logoWidth = width * 0.6;
-      const logoHeight = height * 0.25;
-      const logoX = (width - logoWidth) / 2;
-      doc.image(logoPath, logoX, 5, { width: logoWidth, height: logoHeight });
-    }
-
-    // Título
+    // Título arriba
     doc.fillColor('#003366')
        .font('Helvetica-Bold')
-       .fontSize(10)
-       .text('CREDENCIAL DE AFILIADO', 0, height * 0.32, { align: 'center' });
+       .fontSize(16)
+       .text('CREDENCIAL', 0, 15, { align: 'center' });
 
     // Datos del afiliado
-    doc.moveDown(0.3)
+    doc.moveDown(1)
        .font('Helvetica')
-       .fontSize(8.5)
+       .fontSize(12)
        .fillColor('black')
        .text(`Nombre: ${afiliado.nombre_completo}`, { align: 'center' })
        .text(`DNI: ${afiliado.dni}`, { align: 'center' })
@@ -111,10 +98,20 @@ app.get('/credencial', async (req, res) => {
     const fechaStr = fecha.toLocaleDateString('es-AR') + ' ' +
                      fecha.getHours().toString().padStart(2, '0') + ':' +
                      fecha.getMinutes().toString().padStart(2, '0');
-    doc.moveDown(0.3)
-       .fontSize(7)
+    doc.moveDown(0.5)
+       .fontSize(9)
        .fillColor('#555555')
        .text(`Emitido: ${fechaStr}`, { align: 'center' });
+
+    // Logo centrado en la parte inferior
+    const logoPath = path.join(process.cwd(), 'assets', 'logo.png');
+    if (fs.existsSync(logoPath)) {
+      const logoMaxWidth = width * 0.4;
+      const logoMaxHeight = height * 0.25;
+      const logoX = (width - logoMaxWidth) / 2;
+      const logoY = height - logoMaxHeight - 15;
+      doc.image(logoPath, logoX, logoY, { width: logoMaxWidth, height: logoMaxHeight });
+    }
 
     doc.end();
 
