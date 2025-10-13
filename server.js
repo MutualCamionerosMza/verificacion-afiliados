@@ -5,11 +5,13 @@ import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
 import { Pool } from 'pg';
 import PDFDocument from 'pdfkit';
+import fs from 'fs';
+import path from 'path';
 
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 // --- CORS para tu frontend ---
 app.use(cors({
@@ -24,7 +26,9 @@ app.use(bodyParser.json());
 // --- Conexión a PostgreSQL ---
 const pool = new Pool({
   connectionString: process.env.PG_CONNECTION_STRING,
-  ssl: { rejectUnauthorized: false }
+  ssl: {
+    rejectUnauthorized: false
+  }
 });
 
 // --- Rutas ---
@@ -45,49 +49,52 @@ app.post('/verificar', async (req, res) => {
   }
 });
 
-// Generar credencial PDF con diseño original
-app.post('/credencial', async (req, res) => {
-  const { dni } = req.body;
+// Generar credencial PDF
+app.get('/credencial', async (req, res) => {
+  const { dni } = req.query;
   try {
     const result = await pool.query('SELECT * FROM afiliados WHERE dni=$1', [dni]);
     if (result.rows.length === 0) return res.status(404).send('No se encontró afiliado');
 
     const afiliado = result.rows[0];
+
     const doc = new PDFDocument({ size: 'A4', margin: 50 });
-    let buffers = [];
-    doc.on('data', buffers.push.bind(buffers));
-    doc.on('end', () => {
-      const pdfData = Buffer.concat(buffers);
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename=credencial-${dni}.pdf`);
-      res.send(pdfData);
-    });
 
-    // --- DISEÑO ---
-    doc.rect(0, 0, doc.page.width, doc.page.height).fill('#e6e6e6'); // fondo
-    doc.fillColor('#003366');
-    doc.fontSize(24).text('CREDENCIAL DE AFILIADO', { align: 'center', underline: true });
-    doc.moveDown(2);
+    // --- Encabezado / Diseño ---
+    doc.rect(0, 0, doc.page.width, 100).fill('#004080'); // barra superior azul
+    doc.fillColor('#ffffff').fontSize(24).text('CREDENCIAL DE AFILIADO', 50, 35);
 
-    doc.fillColor('#000000');
-    doc.fontSize(18).text(`Nombre: ${afiliado.nombre_completo}`);
+    // --- Logo (local) ---
+    const logoPath = path.join('.', 'assets', 'logo.png');
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, doc.page.width - 170, 20, { width: 120 });
+    }
+
+    // --- Datos del afiliado ---
+    doc.moveDown(4);
+    doc.fillColor('#000000').fontSize(16);
+    doc.text(`Nombre: ${afiliado.nombre_completo}`);
     doc.text(`DNI: ${afiliado.dni}`);
     doc.text(`N° Afiliado: ${afiliado.nro_afiliado}`);
-    doc.moveDown(2);
 
-    // Logo (puedes cambiar la URL por tu logo oficial)
-    doc.image('https://i.imgur.com/ZXJvT6b.png', doc.page.width/2 - 75, doc.y, { width: 150 });
+    // --- Footer ---
+    doc.rect(0, doc.page.height - 50, doc.page.width, 50).fill('#004080');
 
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=credencial-${dni}.pdf`);
+    doc.pipe(res);
     doc.end();
 
   } catch (error) {
     console.error(error);
-    res.status(500).send('Error generando credencial');
+    res.status(500).send('Error al generar la credencial');
   }
 });
 
 // --- Rutas admin ---
 const ADMIN_PIN = '1906';
+
+// Middleware de validación de PIN
 function validarPin(req, res, next) {
   const pin = req.headers['x-admin-pin'];
   if (pin === ADMIN_PIN) return next();
@@ -149,5 +156,5 @@ app.get('/admin/listar-logs', validarPin, async (req, res) => {
 
 // --- Iniciar servidor ---
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
+  console.log(`Servidor escuchando en puerto ${PORT}`);
 });
