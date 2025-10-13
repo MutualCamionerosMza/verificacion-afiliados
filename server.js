@@ -1,4 +1,3 @@
-// server.js
 import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
@@ -11,16 +10,21 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 🟢 CORS (permitimos el frontend de GitHub Pages)
-app.use(cors({
-  origin: "https://mutualcamionerosmza.github.io",
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  allowedHeaders: ["Content-Type", "x-admin-pin"]
-}));
+// 🟢 Middleware general de CORS
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "https://mutualcamionerosmza.github.io");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, x-admin-pin");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200); // Respuesta inmediata al preflight
+  }
+  next();
+});
 
+app.use(cors());
 app.use(bodyParser.json());
 
-// 🟢 Conexión PostgreSQL
+// 🟢 Conexión a PostgreSQL
 const pool = new Pool({
   connectionString: process.env.PG_CONNECTION_STRING,
   ssl: { rejectUnauthorized: false }
@@ -28,10 +32,10 @@ const pool = new Pool({
 
 // 🟢 Prueba de conexión
 pool.connect()
-  .then(() => console.log("✅ Conectado a PostgreSQL correctamente"))
+  .then(() => console.log("✅ Conectado a PostgreSQL"))
   .catch(err => console.error("❌ Error al conectar con PostgreSQL:", err));
 
-// 🟢 Ruta raíz para probar
+// 🟢 Ruta raíz
 app.get("/", (req, res) => {
   res.send("Servidor de afiliados activo 🚀");
 });
@@ -75,7 +79,7 @@ app.post("/credencial", async (req, res) => {
   }
 });
 
-// 🟢 Resto de rutas administrativas
+// 🟢 Middleware para PIN del admin
 const ADMIN_PIN = process.env.ADMIN_PIN || "1906";
 
 function validarPin(req, res, next) {
@@ -84,6 +88,7 @@ function validarPin(req, res, next) {
   return res.status(403).json({ error: "PIN incorrecto" });
 }
 
+// 🟢 Ruta admin: agregar afiliado
 app.post("/admin/cargar-afiliados", validarPin, async (req, res) => {
   const { dni, nombre_completo, nro_afiliado } = req.body;
   try {
