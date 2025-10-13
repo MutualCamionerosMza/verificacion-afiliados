@@ -1,138 +1,165 @@
-// server.js
-import express from 'express';
-import cors from 'cors';
-import bodyParser from 'body-parser';
-import dotenv from 'dotenv';
-import { Pool } from 'pg';
-import pdf from 'pdfkit';
+// =============================
+// 📦 Importar dependencias
+// =============================
+import express from "express";
+import bodyParser from "body-parser";
+import cors from "cors";
+import session from "express-session";
+import dotenv from "dotenv";
+import pkg from "pg";
+import fs from "fs";
+import path from "path";
+import PDFDocument from "pdfkit";
+import moment from "moment";
+import csv from "csv-parser";
 
+// =============================
+// ⚙️ Configuración inicial
+// =============================
 dotenv.config();
-
+const { Pool } = pkg;
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --- CORS ---
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', 'https://mutualcamionerosmza.github.io');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, x-admin-pin');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-});
-
-// --- Body parser ---
+// =============================
+// 🧩 Middlewares
+// =============================
 app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
-// --- Conexión a PostgreSQL ---
+// 🔐 Sesiones para el panel admin
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "clave-secreta",
+    resave: false,
+    saveUninitialized: true,
+    cookie: { maxAge: 5 * 60 * 1000 }, // 5 minutos
+  })
+);
+
+// 🌐 CORS: permitir solo tu frontend
+app.use(
+  cors({
+    origin: "https://mutualcamionerosmza.github.io",
+    methods: ["GET", "POST"],
+  })
+);
+
+// =============================
+// 🗄️ Conexión a la base de datos PostgreSQL
+// =============================
 const pool = new Pool({
   connectionString: process.env.PG_CONNECTION_STRING,
-  ssl: {
-    rejectUnauthorized: false
-  }
+  ssl: { rejectUnauthorized: false },
 });
 
-// --- Ruta base para comprobar estado ---
-app.get('/', (req, res) => {
-  res.send('Servidor de afiliados activo');
-});
+// Probar conexión
+pool
+  .connect()
+  .then(() => console.log("✅ Conectado a PostgreSQL correctamente"))
+  .catch((err) => console.error("❌ Error al conectar con PostgreSQL:", err));
 
-// --- Verificar afiliado ---
-app.post('/verificar', async (req, res) => {
-  const { dni } = req.body;
+// =============================
+// 🧾 Rutas de la API
+// =============================
+
+// ➤ Verificar afiliado
+app.get("/verificar", async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM afiliados WHERE dni=$1', [dni]);
-    if (result.rows.length > 0) {
-      res.json({ afiliado: true, datos: result.rows[0] });
-    } else {
-      res.json({ afiliado: false });
+    const { dni, nombre, apellido } = req.query;
+    if (!dni && (!nombre || !apellido)) {
+      return res.status(400).json({ error: "Faltan datos para la verificación" });
     }
+
+    const result = await pool.query(
+      "SELECT * FROM afiliados WHERE dni = $1 OR (LOWER(nombre) = LOWER($2) AND LOWER(apellido) = LOWER($3))",
+      [dni, nombre, apellido]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ afiliado: null, mensaje: "No se encontró afiliado" });
+    }
+
+    res.json({ afiliado: result.rows[0] });
   } catch (error) {
-    console.error('Error en /verificar:', error);
-    res.status(500).json({ error: 'Error en la base de datos' });
+    console.error("Error en /verificar:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
   }
 });
 
-// --- Generar credencial PDF ---
-app.post('/credencial', async (req, res) => {
-  const { dni } = req.body;
+// ➤ Generar credencial PDF
+app.get("/credencial", async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM afiliados WHERE dni=$1', [dni]);
-    if (result.rows.length === 0) return res.status(404).send('No se encontró afiliado');
+    const { dni } = req.query;
+    if (!dni) return res.status(400).send("DNI requerido");
+
+    const result = await pool.query("SELECT * FROM afiliados WHERE dni = $1", [dni]);
+    if (result.rows.length === 0) return res.status(404).send("Afiliado no encontrado");
 
     const afiliado = result.rows[0];
-    const doc = new pdf();
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename=credencial-${dni}.pdf`);
-    doc.text(`Credencial de Afiliado\n\nNombre: ${afiliado.nombre_completo}\nDNI: ${afiliado.dni}\nN° Afiliado: ${afiliado.nro_afiliado}`);
-    doc.pipe(res);
+
+    // Crear PDF
+    const doc = new PDFDocument({ size: "credit-card", layout: "landscape" });
+    const filePath = path.join("/tmp", `credencial_${dni}.pdf`);
+
+    doc.pipe(fs.createWriteStream(filePath));
+
+    // Fondo
+    doc.rect(0, 0, 300, 200).fill("#004B8D");
+    doc.fillColor("white").fontSize(16).text("Mutual Camioneros Mendoza", 20, 20);
+
+    // Datos
+    doc.fillColor("white").fontSize(12);
+    doc.text(`Nombre: ${afiliado.nombre}`, 20, 80);
+    doc.text(`Apellido: ${afiliado.apellido}`, 20, 100);
+    doc.text(`DNI: ${afiliado.dni}`, 20, 120);
+    doc.text(`Fecha: ${moment().format("DD/MM/YYYY")}`, 20, 140);
+
     doc.end();
+
+    doc.on("finish", () => {
+      res.download(filePath, `credencial_${dni}.pdf`, () => {
+        fs.unlinkSync(filePath); // elimina el archivo temporal
+      });
+    });
   } catch (error) {
-    console.error('Error en /credencial:', error);
-    res.status(500).send('Error generando credencial');
+    console.error("Error en /credencial:", error);
+    res.status(500).send("Error al generar la credencial");
   }
 });
 
-// --- PIN y rutas admin ---
-const ADMIN_PIN = '1906';
+// =============================
+// 🧠 Rutas del panel de administración
+// =============================
 
-function validarPin(req, res, next) {
-  const pin = req.headers['x-admin-pin'];
-  if (pin === ADMIN_PIN) return next();
-  return res.status(403).json({ error: 'PIN incorrecto' });
-}
+// ➤ Login con PIN
+app.post("/login", (req, res) => {
+  const { pin } = req.body;
+  const ADMIN_PIN = process.env.ADMIN_PIN || "1234";
 
-app.post('/admin/cargar-afiliados', validarPin, async (req, res) => {
-  const { dni, nombre_completo, nro_afiliado } = req.body;
-  try {
-    await pool.query('INSERT INTO afiliados (dni, nombre_completo, nro_afiliado) VALUES ($1,$2,$3)', [dni, nombre_completo, nro_afiliado]);
-    await pool.query('INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())', ['Agregar', dni, nombre_completo, nro_afiliado]);
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error en /admin/cargar-afiliados:', error);
-    res.json({ success: false, error: 'Error al agregar afiliado' });
+  if (pin === ADMIN_PIN) {
+    req.session.autenticado = true;
+    res.json({ exito: true });
+  } else {
+    res.status(401).json({ exito: false, mensaje: "PIN incorrecto" });
   }
 });
 
-app.put('/admin/editar-afiliado', validarPin, async (req, res) => {
-  const { dni, nombre_completo, nro_afiliado } = req.body;
-  try {
-    await pool.query('UPDATE afiliados SET nombre_completo=$1, nro_afiliado=$2 WHERE dni=$3', [nombre_completo, nro_afiliado, dni]);
-    await pool.query('INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())', ['Editar', dni, nombre_completo, nro_afiliado]);
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error en /admin/editar-afiliado:', error);
-    res.json({ success: false, error: 'Error al editar afiliado' });
-  }
+// ➤ Verificar sesión
+app.get("/session", (req, res) => {
+  res.json({ autenticado: req.session.autenticado || false });
 });
 
-app.post('/admin/eliminar-afiliado', validarPin, async (req, res) => {
-  const { dni } = req.body;
-  try {
-    const result = await pool.query('SELECT * FROM afiliados WHERE dni=$1', [dni]);
-    if (result.rows.length === 0) return res.json({ success: false, error: 'Afiliado no encontrado' });
-    const afiliado = result.rows[0];
-    await pool.query('DELETE FROM afiliados WHERE dni=$1', [dni]);
-    await pool.query('INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())', ['Eliminar', dni, afiliado.nombre_completo, afiliado.nro_afiliado]);
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error en /admin/eliminar-afiliado:', error);
-    res.json({ success: false, error: 'Error al eliminar afiliado' });
-  }
+// ➤ Cerrar sesión
+app.post("/logout", (req, res) => {
+  req.session.destroy(() => {
+    res.json({ exito: true });
+  });
 });
 
-app.get('/admin/listar-logs', validarPin, async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM logs ORDER BY fecha DESC LIMIT 50');
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error en /admin/listar-logs:', error);
-    res.json({ error: 'Error al cargar logs' });
-  }
-});
-
-// --- Iniciar servidor ---
+// =============================
+// 🚀 Iniciar servidor
+// =============================
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
+  console.log(`🚀 Servidor escuchando en puerto ${PORT}`);
 });
