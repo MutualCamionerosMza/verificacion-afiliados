@@ -1,31 +1,30 @@
-// server.js
-import express from 'express';
-import cors from 'cors';
-import bodyParser from 'body-parser';
-import dotenv from 'dotenv';
-import { Pool } from 'pg';
-import PDFDocument from 'pdfkit';
-import fs from 'fs';
-import path from 'path';
+import express from "express";
+import fs from "fs";
+import path from "path";
+import PDFDocument from "pdfkit";
+import cors from "cors";
+import { Pool } from "pg";
+import { fileURLToPath } from "url";
+import dotenv from "dotenv";
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// --- CORS ---
+app.use(express.json());
 app.use(
   cors({
-    origin: 'https://mutualcamionerosmza.github.io',
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'x-admin-pin'],
+    origin: "https://mutualcamionerosmza.github.io",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "x-admin-pin"],
   })
 );
 
-// --- Body parser ---
-app.use(bodyParser.json());
-
-// --- PostgreSQL ---
+// 🔹 Conexión PostgreSQL
 const pool = new Pool({
   connectionString: process.env.PG_CONNECTION_STRING,
   ssl: { rejectUnauthorized: false },
@@ -33,171 +32,228 @@ const pool = new Pool({
 
 pool
   .connect()
-  .then(() => console.log('✅ Conectado a PostgreSQL'))
-  .catch((err) => console.error('❌ Error al conectar con PostgreSQL:', err));
+  .then(() => console.log("✅ Conectado a PostgreSQL"))
+  .catch((err) => console.error("❌ Error al conectar con PostgreSQL:", err));
 
-// --- Rutas ---
-// Verificar afiliado
-app.post('/verificar', async (req, res) => {
+// ====================================================
+// 🔹 RUTA VERIFICAR AFILIADO
+// ====================================================
+app.post("/verificar", async (req, res) => {
   const { dni } = req.body;
+  if (!dni) return res.status(400).json({ error: "Falta el DNI" });
+
   try {
-    const result = await pool.query('SELECT * FROM afiliados WHERE dni=$1', [dni]);
+    const result = await pool.query("SELECT * FROM afiliados WHERE dni = $1", [dni]);
     if (result.rows.length > 0) {
       res.json({ afiliado: true, datos: result.rows[0] });
     } else {
       res.json({ afiliado: false });
     }
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error en la base de datos' });
+    console.error("Error en /verificar:", error);
+    res.status(500).json({ error: "Error en el servidor" });
   }
 });
 
-// Generar credencial PDF
-app.get('/credencial', async (req, res) => {
+// ====================================================
+// 🔹 RUTA GENERAR CREDENCIAL
+// ====================================================
+app.get("/credencial", async (req, res) => {
   const { dni } = req.query;
-  if (!dni) return res.status(400).send('Falta el DNI');
+  if (!dni) return res.status(400).send("Falta DNI");
 
   try {
-    const result = await pool.query('SELECT * FROM afiliados WHERE dni=$1', [dni]);
-    if (result.rows.length === 0) return res.status(404).send('No se encontró afiliado');
+    const result = await pool.query("SELECT * FROM afiliados WHERE dni = $1", [dni]);
+    if (result.rows.length === 0) return res.status(404).send("Afiliado no encontrado");
 
     const afiliado = result.rows[0];
 
-    // Fecha y hora en formato local (Argentina)
-    const fechaHora = new Date().toLocaleString('es-AR', {
-      timeZone: 'America/Argentina/Buenos_Aires',
-      hour12: false,
+    // 📏 Tamaño tipo credencial horizontal (14x8.5 cm aprox)
+    const mmToPt = (mm) => mm * 2.83465;
+    const width = mmToPt(140);
+    const height = mmToPt(85);
+
+    const doc = new PDFDocument({
+      size: [width, height],
+      margins: { top: 20, bottom: 20, left: 30, right: 30 },
     });
 
-    // Crear documento tamaño credencial (mitad de A4)
-    const doc = new PDFDocument({ size: [420, 297], margin: 20 }); // aprox. media A4
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename=credencial-${dni}.pdf`);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename=credencial-${dni}.pdf`);
+    doc.pipe(res);
 
-    // Fondo azul igual al front
-    doc.rect(0, 0, doc.page.width, doc.page.height).fill('#e6e6e6');
-    doc.fillColor('black');
+    // Fondo gris claro
+    doc.rect(0, 0, width, height).fill("#e6e6e6");
 
-    // Contenedor blanco con bordes redondeados
-    const cardWidth = doc.page.width - 60;
-    const cardHeight = doc.page.height - 60;
-    const cardX = 30;
-    const cardY = 30;
-
-    doc.save();
-    doc.roundedRect(cardX, cardY, cardWidth, cardHeight, 20).fill('white');
-    doc.restore();
+    // Marco azul con esquinas redondeadas
+    const borderRadius = 15;
+    doc
+      .save()
+      .lineWidth(3)
+      .strokeColor("#003366")
+      .moveTo(borderRadius, 0)
+      .lineTo(width - borderRadius, 0)
+      .quadraticCurveTo(width, 0, width, borderRadius)
+      .lineTo(width, height - borderRadius)
+      .quadraticCurveTo(width, height, width - borderRadius, height)
+      .lineTo(borderRadius, height)
+      .quadraticCurveTo(0, height, 0, height - borderRadius)
+      .lineTo(0, borderRadius)
+      .quadraticCurveTo(0, 0, borderRadius, 0)
+      .stroke()
+      .restore();
 
     // Título
-    doc.fillColor('#003366')
-      .fontSize(28)
-      .font('Helvetica-Bold')
-      .text('CREDENCIAL', 0, 60, { align: 'center' });
+    doc
+      .fillColor("#003366")
+      .font("Helvetica-Bold")
+      .fontSize(16)
+      .text("ASOCIACIÓN MUTUAL CAMIONEROS DE MENDOZA", {
+        align: "center",
+        lineGap: 8,
+      });
+
+    doc.moveDown(1.2);
 
     // Datos del afiliado
-    doc.fillColor('black').fontSize(16).font('Helvetica');
-    doc.text(`Nombre: ${afiliado.nombre_completo}`, 70, 130);
-    doc.text(`DNI: ${afiliado.dni}`, 70, 160);
-    doc.text(`N° Afiliado: ${afiliado.nro_afiliado}`, 70, 190);
-    doc.text(`Fecha y hora: ${fechaHora}`, 70, 220);
+    doc.font("Helvetica").fillColor("#000000").fontSize(12);
+    doc.text(`Nombre: ${afiliado.nombre_completo}`, { align: "left" });
+    doc.text(`DNI: ${afiliado.dni}`, { align: "left" });
+    doc.text(`N° Afiliado: ${afiliado.nro_afiliado}`, { align: "left" });
 
-    // Logo centrado en la parte inferior (más grande y proporcional)
-    const logoPath = path.resolve('./assets/logo.png');
+    // Fecha y hora (ajustada a Argentina UTC−3)
+    const fecha = new Date();
+    const fechaLocal = new Date(fecha.getTime() - 3 * 60 * 60 * 1000);
+    const fechaStr = fechaLocal.toLocaleDateString("es-AR");
+    const horaStr =
+      fechaLocal.getHours().toString().padStart(2, "0") +
+      ":" +
+      fechaLocal.getMinutes().toString().padStart(2, "0") +
+      ":" +
+      fechaLocal.getSeconds().toString().padStart(2, "0");
+
+    doc.text(`Fecha de solicitud: ${fechaStr}, ${horaStr}`, {
+      align: "left",
+      lineGap: 10,
+    });
+
+    // Logo centrado (manteniendo proporción)
+    const logoPath = path.join(__dirname, "assets", "logo.png");
     if (fs.existsSync(logoPath)) {
-      const logoWidth = 200; // más grande que antes
-      const logoHeight = 200; // proporcional
-      const logoX = (doc.page.width - logoWidth) / 2;
-      const logoY = doc.page.height - logoHeight - 40;
-      doc.image(logoPath, logoX, logoY, { width: logoWidth, height: logoHeight });
+      const image = fs.readFileSync(logoPath);
+      const tempDoc = new PDFDocument({ autoFirstPage: false });
+      const img = doc.openImage(image);
+
+      const logoMaxWidth = width * 0.35 * 1.2;
+      const logoMaxHeight = height * 0.25 * 1.2;
+      let logoWidth = img.width;
+      let logoHeight = img.height;
+
+      // Mantener proporción
+      const ratio = Math.min(logoMaxWidth / logoWidth, logoMaxHeight / logoHeight);
+      logoWidth *= ratio;
+      logoHeight *= ratio;
+
+      const logoX = (width - logoWidth) / 2;
+      const logoY = height - logoHeight - 25;
+
+      doc.image(logoPath, logoX, logoY, {
+        width: logoWidth,
+        height: logoHeight,
+      });
     }
 
     doc.end();
-    doc.pipe(res);
   } catch (error) {
-    console.error('Error generando credencial:', error);
-    res.status(500).send('Error generando credencial');
+    console.error("Error generando credencial:", error);
+    res.status(500).send("Error generando credencial");
   }
 });
 
-// --- Admin ---
-const ADMIN_PIN = '1906';
+// ====================================================
+// 🔹 RUTAS ADMINISTRADOR (con PIN)
+// ====================================================
+const ADMIN_PIN = "1906";
+
 function validarPin(req, res, next) {
-  const pin = req.headers['x-admin-pin'];
+  const pin = req.headers["x-admin-pin"];
   if (pin === ADMIN_PIN) return next();
-  return res.status(403).json({ error: 'PIN incorrecto' });
+  return res.status(403).json({ error: "PIN incorrecto" });
 }
 
-// Agregar afiliado
-app.post('/admin/cargar-afiliados', validarPin, async (req, res) => {
+// ➤ Agregar afiliado
+app.post("/admin/cargar-afiliados", validarPin, async (req, res) => {
   const { dni, nombre_completo, nro_afiliado } = req.body;
   try {
     await pool.query(
-      'INSERT INTO afiliados (dni, nombre_completo, nro_afiliado) VALUES ($1,$2,$3)',
+      "INSERT INTO afiliados (dni, nombre_completo, nro_afiliado) VALUES ($1,$2,$3)",
       [dni, nombre_completo, nro_afiliado]
     );
     await pool.query(
-      'INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())',
-      ['Agregar', dni, nombre_completo, nro_afiliado]
+      "INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())",
+      ["Agregar", dni, nombre_completo, nro_afiliado]
     );
     res.json({ success: true });
   } catch (error) {
     console.error(error);
-    res.json({ success: false, error: 'Error al agregar afiliado' });
+    res.json({ success: false, error: "Error al agregar afiliado" });
   }
 });
 
-// Editar afiliado
-app.put('/admin/editar-afiliado', validarPin, async (req, res) => {
+// ➤ Editar afiliado
+app.put("/admin/editar-afiliado", validarPin, async (req, res) => {
   const { dni, nombre_completo, nro_afiliado } = req.body;
   try {
     await pool.query(
-      'UPDATE afiliados SET nombre_completo=$1, nro_afiliado=$2 WHERE dni=$3',
+      "UPDATE afiliados SET nombre_completo=$1, nro_afiliado=$2 WHERE dni=$3",
       [nombre_completo, nro_afiliado, dni]
     );
     await pool.query(
-      'INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())',
-      ['Editar', dni, nombre_completo, nro_afiliado]
+      "INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())",
+      ["Editar", dni, nombre_completo, nro_afiliado]
     );
     res.json({ success: true });
   } catch (error) {
     console.error(error);
-    res.json({ success: false, error: 'Error al editar afiliado' });
+    res.json({ success: false, error: "Error al editar afiliado" });
   }
 });
 
-// Eliminar afiliado
-app.post('/admin/eliminar-afiliado', validarPin, async (req, res) => {
+// ➤ Eliminar afiliado
+app.post("/admin/eliminar-afiliado", validarPin, async (req, res) => {
   const { dni } = req.body;
   try {
-    const result = await pool.query('SELECT * FROM afiliados WHERE dni=$1', [dni]);
+    const result = await pool.query("SELECT * FROM afiliados WHERE dni=$1", [dni]);
     if (result.rows.length === 0)
-      return res.json({ success: false, error: 'Afiliado no encontrado' });
+      return res.json({ success: false, error: "Afiliado no encontrado" });
+
     const afiliado = result.rows[0];
-    await pool.query('DELETE FROM afiliados WHERE dni=$1', [dni]);
+    await pool.query("DELETE FROM afiliados WHERE dni=$1", [dni]);
     await pool.query(
-      'INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())',
-      ['Eliminar', dni, afiliado.nombre_completo, afiliado.nro_afiliado]
+      "INSERT INTO logs (accion, dni, nombre_completo, nro_afiliado, fecha) VALUES ($1,$2,$3,$4,NOW())",
+      ["Eliminar", dni, afiliado.nombre_completo, afiliado.nro_afiliado]
     );
     res.json({ success: true });
   } catch (error) {
     console.error(error);
-    res.json({ success: false, error: 'Error al eliminar afiliado' });
+    res.json({ success: false, error: "Error al eliminar afiliado" });
   }
 });
 
-// Listar logs
-app.get('/admin/listar-logs', validarPin, async (req, res) => {
+// ➤ Listar logs
+app.get("/admin/listar-logs", validarPin, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM logs ORDER BY fecha DESC LIMIT 50');
+    const result = await pool.query("SELECT * FROM logs ORDER BY fecha DESC LIMIT 50");
     res.json(result.rows);
   } catch (error) {
     console.error(error);
-    res.json({ error: 'Error al cargar logs' });
+    res.json({ error: "Error al cargar logs" });
   }
 });
 
-// --- Iniciar servidor ---
+// ====================================================
+// 🔹 INICIAR SERVIDOR
+// ====================================================
 app.listen(PORT, () => {
   console.log(`✅ Servidor corriendo en puerto ${PORT}`);
 });
