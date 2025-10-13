@@ -5,24 +5,25 @@ import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
 import { Pool } from 'pg';
 import PDFDocument from 'pdfkit';
+import fs from 'fs';
+import path from 'path';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// --- CORS para permitir tu frontend ---
+// --- CORS ---
 app.use(cors({
   origin: 'https://mutualcamionerosmza.github.io',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  methods: ['GET','POST','PUT','DELETE'],
   allowedHeaders: ['Content-Type', 'x-admin-pin']
 }));
 
 // --- Body parser ---
 app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
 
-// --- Conexión PostgreSQL ---
+// --- PostgreSQL ---
 const pool = new Pool({
   connectionString: process.env.PG_CONNECTION_STRING,
   ssl: { rejectUnauthorized: false }
@@ -49,8 +50,7 @@ app.post('/verificar', async (req, res) => {
   }
 });
 
-// Generar credencial PDF
-// Usa GET con query ?dni=XXXX para que se abra en navegador
+// Generar credencial PDF (GET con query)
 app.get('/credencial', async (req, res) => {
   const { dni } = req.query;
   if (!dni) return res.status(400).send('Falta el DNI');
@@ -62,29 +62,39 @@ app.get('/credencial', async (req, res) => {
     const afiliado = result.rows[0];
 
     const doc = new PDFDocument({ size: 'A4', margin: 50 });
-
-    // Cabecera: logo y título
-    doc.image('logo.png', 50, 40, { width: 100 }); // pon tu logo en la carpeta raíz
-    doc.fontSize(20).fillColor('#004080').text('CREDENCIAL DE AFILIADO', 160, 50);
-
-    // Datos del afiliado
-    doc.moveDown(2);
-    doc.fontSize(14).fillColor('#000000');
-    doc.text(`Nombre: ${afiliado.nombre_completo}`);
-    doc.text(`DNI: ${afiliado.dni}`);
-    doc.text(`N° Afiliado: ${afiliado.nro_afiliado}`);
-
-    // Pie con colores o estilo que quieras
-    doc.moveDown(2);
-    doc.fillColor('#004080').text('Mutual Camioneros Mendoza', { align: 'center' });
-
+    
+    // Configurar headers
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=credencial-${dni}.pdf`);
 
-    doc.pipe(res);
+    // Logo (ajusta la ruta si lo tienes local)
+    const logoUrl = 'https://i.imgur.com/ZXJvT6b.png';
+
+    // Título
+    doc.fillColor('#003366').fontSize(28).text('CREDENCIAL DE AFILIADO', { align: 'center' });
+    doc.moveDown();
+
+    // Datos
+    doc.fillColor('black').fontSize(18);
+    doc.text(`Nombre: ${afiliado.nombre_completo}`);
+    doc.text(`DNI: ${afiliado.dni}`);
+    doc.text(`N° Afiliado: ${afiliado.nro_afiliado}`);
+    doc.moveDown();
+
+    // Logo
+    const logoPath = path.join('/tmp', 'logo.png');
+    // Descargar el logo temporalmente
+    const fetch = (await import('node-fetch')).default;
+    const response = await fetch(logoUrl);
+    const buffer = await response.arrayBuffer();
+    fs.writeFileSync(logoPath, Buffer.from(buffer));
+    doc.image(logoPath, { fit: [150, 150], align: 'center' });
+
     doc.end();
+    doc.pipe(res);
+
   } catch (error) {
-    console.error(error);
+    console.error('Error generando credencial:', error);
     res.status(500).send('Error generando credencial');
   }
 });
@@ -167,5 +177,5 @@ app.get('/admin/listar-logs', validarPin, async (req, res) => {
 
 // --- Iniciar servidor ---
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor escuchando en puerto ${PORT}`);
+  console.log(`Servidor corriendo en puerto ${PORT}`);
 });
