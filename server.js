@@ -85,6 +85,24 @@ app.get("/credencial", async (req, res) => {
     // Fondo gris claro
     doc.rect(0, 0, width, height).fill("#e6e6e6");
 
+    // Marco azul con esquinas redondeadas
+    const borderRadius = 15;
+    doc
+      .save()
+      .lineWidth(3)
+      .strokeColor("#003366")
+      .moveTo(borderRadius, 0)
+      .lineTo(width - borderRadius, 0)
+      .quadraticCurveTo(width, 0, width, borderRadius)
+      .lineTo(width, height - borderRadius)
+      .quadraticCurveTo(width, height, width - borderRadius, height)
+      .lineTo(borderRadius, height)
+      .quadraticCurveTo(0, height, 0, height - borderRadius)
+      .lineTo(0, borderRadius)
+      .quadraticCurveTo(0, 0, borderRadius, 0)
+      .stroke()
+      .restore();
+
     // Título
     doc
       .fillColor("#003366")
@@ -103,31 +121,45 @@ app.get("/credencial", async (req, res) => {
     doc.text(`DNI: ${afiliado.dni}`, { align: "left" });
     doc.text(`N° Afiliado: ${afiliado.nro_afiliado}`, { align: "left" });
 
-    // Fecha y hora (formato 24 hs)
+    // Fecha y hora (ajustada a Argentina UTC−3)
     const fecha = new Date();
-    const fechaStr = fecha.toLocaleDateString("es-AR");
+    const fechaLocal = new Date(fecha.getTime() - 3 * 60 * 60 * 1000);
+    const fechaStr = fechaLocal.toLocaleDateString("es-AR");
     const horaStr =
-      fecha.getHours().toString().padStart(2, "0") +
+      fechaLocal.getHours().toString().padStart(2, "0") +
       ":" +
-      fecha.getMinutes().toString().padStart(2, "0") +
+      fechaLocal.getMinutes().toString().padStart(2, "0") +
       ":" +
-      fecha.getSeconds().toString().padStart(2, "0");
+      fechaLocal.getSeconds().toString().padStart(2, "0");
+
     doc.text(`Fecha de solicitud: ${fechaStr}, ${horaStr}`, {
       align: "left",
       lineGap: 10,
     });
 
-    // Logo centrado en la parte inferior
+    // Logo centrado (manteniendo proporción)
     const logoPath = path.join(__dirname, "assets", "logo.png");
     if (fs.existsSync(logoPath)) {
-      const logoWidth = width * 0.35; // proporcional
-      const logoHeight = height * 0.25;
+      const image = fs.readFileSync(logoPath);
+      const tempDoc = new PDFDocument({ autoFirstPage: false });
+      const img = doc.openImage(image);
+
+      const logoMaxWidth = width * 0.35;
+      const logoMaxHeight = height * 0.25;
+      let logoWidth = img.width;
+      let logoHeight = img.height;
+
+      // Mantener proporción
+      const ratio = Math.min(logoMaxWidth / logoWidth, logoMaxHeight / logoHeight);
+      logoWidth *= ratio;
+      logoHeight *= ratio;
+
       const logoX = (width - logoWidth) / 2;
       const logoY = height - logoHeight - 25;
+
       doc.image(logoPath, logoX, logoY, {
         width: logoWidth,
         height: logoHeight,
-        align: "center",
       });
     }
 
