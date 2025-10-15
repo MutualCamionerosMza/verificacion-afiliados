@@ -137,30 +137,28 @@ app.get("/credencial", async (req, res) => {
       lineGap: 10,
     });
 
-    // Logo centrado (manteniendo proporción y más grande)
+    // Logo centrado en la parte inferior (manteniendo proporción)
     const logoPath = path.join(__dirname, "assets", "logo.png");
     if (fs.existsSync(logoPath)) {
       const image = fs.readFileSync(logoPath);
-      const tempDoc = new PDFDocument({ autoFirstPage: false });
       const img = doc.openImage(image);
 
-      // 🔹 ÚNICO CAMBIO: aumentar logo proporcionalmente
-      const logoMaxWidth = width * 0.5;   // 50% del ancho
+      // 🔹 Tamaño más grande y proporcional
+      const logoMaxWidth = width * 0.55;  // 55% del ancho
       const logoMaxHeight = height * 0.35; // 35% de la altura
       let logoWidth = img.width;
       let logoHeight = img.height;
 
+      // Mantener proporción
       const ratio = Math.min(logoMaxWidth / logoWidth, logoMaxHeight / logoHeight);
       logoWidth *= ratio;
       logoHeight *= ratio;
 
+      // Posición: centrado horizontal y cerca del borde inferior
       const logoX = (width - logoWidth) / 2;
       const logoY = height - logoHeight - 25;
 
-      doc.image(logoPath, logoX, logoY, {
-        width: logoWidth,
-        height: logoHeight,
-      });
+      doc.image(logoPath, logoX, logoY, { width: logoWidth, height: logoHeight });
     }
 
     doc.end();
