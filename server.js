@@ -132,28 +132,29 @@ app.get("/credencial", async (req, res) => {
       ":" +
       fechaLocal.getSeconds().toString().padStart(2, "0");
 
+    const fechaY = doc.y; // posición actual después de la fecha
     doc.text(`Fecha de solicitud: ${fechaStr}, ${horaStr}`, {
       align: "left",
       lineGap: 10,
     });
 
-    // 🔹 Logo pegado al borde inferior, proporcional y grande
+    // 🔹 Logo ajustado automáticamente al espacio disponible en la parte inferior
     const logoPath = path.join(__dirname, "assets", "logo.png");
     if (fs.existsSync(logoPath)) {
       const img = doc.openImage(logoPath);
 
       const logoMaxWidth = width * 0.95;
-      const logoMaxHeight = height * 0.7; // hasta 70% de la altura para ocupar el espacio inferior
+      const availableHeight = height - doc.y - mmToPt(5); // espacio desde el final del texto hasta borde inferior (5pt margen)
 
       let logoWidth = img.width;
       let logoHeight = img.height;
 
-      const ratio = Math.min(logoMaxWidth / logoWidth, logoMaxHeight / logoHeight);
+      const ratio = Math.min(logoMaxWidth / logoWidth, availableHeight / logoHeight);
       logoWidth *= ratio;
       logoHeight *= ratio;
 
       const logoX = (width - logoWidth) / 2;
-      const logoY = height - logoHeight - mmToPt(5); // solo 5 pt de margen inferior
+      const logoY = height - logoHeight - mmToPt(2); // pequeño margen inferior
 
       doc.image(logoPath, logoX, logoY, { width: logoWidth, height: logoHeight });
     }
