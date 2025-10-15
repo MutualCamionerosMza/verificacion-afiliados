@@ -82,11 +82,8 @@ app.get("/credencial", async (req, res) => {
     res.setHeader("Content-Disposition", `inline; filename=credencial-${dni}.pdf`);
     doc.pipe(res);
 
-    // Fondo con leve degradado gris
-    const gradient = doc.linearGradient(0, 0, 0, height);
-    gradient.stop(0, "#f2f2f2");
-    gradient.stop(1, "#e6e6e6");
-    doc.rect(0, 0, width, height).fill(gradient);
+    // Fondo gris claro
+    doc.rect(0, 0, width, height).fill("#e6e6e6");
 
     // Marco azul con esquinas redondeadas
     const borderRadius = 15;
@@ -118,8 +115,8 @@ app.get("/credencial", async (req, res) => {
 
     doc.moveDown(1.2);
 
-    // Datos del afiliado
-    doc.font("Helvetica").fillColor("#000000").fontSize(12);
+    // Datos del afiliado (color igual al título)
+    doc.font("Helvetica").fillColor("#003366").fontSize(12);
     doc.text(`Nombre: ${afiliado.nombre_completo}`, { align: "left" });
     doc.text(`DNI: ${afiliado.dni}`, { align: "left" });
     doc.text(`N° Afiliado: ${afiliado.nro_afiliado}`, { align: "left" });
@@ -140,20 +137,18 @@ app.get("/credencial", async (req, res) => {
       lineGap: 10,
     });
 
-    // Línea separadora azul antes del logo
-    doc.moveTo(20, height * 0.55).lineTo(width - 20, height * 0.55).lineWidth(2).strokeColor("#003366").stroke();
-
     // Logo centrado en la parte inferior (mucho más grande)
     const logoPath = path.join(__dirname, "assets", "logo.png");
     if (fs.existsSync(logoPath)) {
       const img = doc.openImage(logoPath);
 
-      const logoMaxWidth = width * 0.9;   // 90% del ancho
-      const logoMaxHeight = height * 0.45; // 45% de la altura
+      const logoMaxWidth = width * 0.85;   // 85% del ancho
+      const logoMaxHeight = height * 0.5;  // 50% de la altura
 
       let logoWidth = img.width;
       let logoHeight = img.height;
 
+      // Mantener proporción
       const ratio = Math.min(logoMaxWidth / logoWidth, logoMaxHeight / logoHeight);
       logoWidth *= ratio;
       logoHeight *= ratio;
