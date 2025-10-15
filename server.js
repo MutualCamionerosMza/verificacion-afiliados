@@ -153,7 +153,7 @@ app.get("/credencial", async (req, res) => {
       logoHeight *= ratio;
 
       const logoX = (width - logoWidth) / 2;
-      const logoY = height - logoHeight - 5; // casi tocando el borde inferior
+      const logoY = height - logoHeight - 2; // casi tocando el borde inferior
 
       doc.image(logoPath, logoX, logoY, { width: logoWidth, height: logoHeight });
     }
