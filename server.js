@@ -137,13 +137,13 @@ app.get("/credencial", async (req, res) => {
       lineGap: 10,
     });
 
-    // 🔹 Logo centrado, más grande y más abajo (a ~2 cm del borde inferior)
+    // 🔹 Logo pegado al borde inferior, proporcional y grande
     const logoPath = path.join(__dirname, "assets", "logo.png");
     if (fs.existsSync(logoPath)) {
       const img = doc.openImage(logoPath);
 
       const logoMaxWidth = width * 0.95;
-      const logoMaxHeight = height * 0.55;
+      const logoMaxHeight = height * 0.7; // hasta 70% de la altura para ocupar el espacio inferior
 
       let logoWidth = img.width;
       let logoHeight = img.height;
@@ -153,7 +153,7 @@ app.get("/credencial", async (req, res) => {
       logoHeight *= ratio;
 
       const logoX = (width - logoWidth) / 2;
-      const logoY = height - logoHeight - mmToPt(20); // a unos 2 cm del borde inferior
+      const logoY = height - logoHeight - mmToPt(5); // solo 5 pt de margen inferior
 
       doc.image(logoPath, logoX, logoY, { width: logoWidth, height: logoHeight });
     }
