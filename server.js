@@ -115,13 +115,13 @@ app.get("/credencial", async (req, res) => {
 
     doc.moveDown(1.2);
 
-    // Datos del afiliado (color igual al título)
+    // Datos del afiliado
     doc.font("Helvetica").fillColor("#003366").fontSize(12);
     doc.text(`Nombre: ${afiliado.nombre_completo}`, { align: "left" });
     doc.text(`DNI: ${afiliado.dni}`, { align: "left" });
     doc.text(`N° Afiliado: ${afiliado.nro_afiliado}`, { align: "left" });
 
-    // Fecha y hora (ajustada a Argentina UTC−3)
+    // Fecha y hora
     const fecha = new Date();
     const fechaLocal = new Date(fecha.getTime() - 3 * 60 * 60 * 1000);
     const fechaStr = fechaLocal.toLocaleDateString("es-AR");
@@ -137,13 +137,13 @@ app.get("/credencial", async (req, res) => {
       lineGap: 10,
     });
 
-    // 🔹 Logo centrado, más grande y bien abajo
+    // 🔹 Logo centrado, más grande y más abajo (a ~2 cm del borde inferior)
     const logoPath = path.join(__dirname, "assets", "logo.png");
     if (fs.existsSync(logoPath)) {
       const img = doc.openImage(logoPath);
 
-      const logoMaxWidth = width * 0.9;   // más ancho
-      const logoMaxHeight = height * 0.6; // más alto
+      const logoMaxWidth = width * 0.95;
+      const logoMaxHeight = height * 0.55;
 
       let logoWidth = img.width;
       let logoHeight = img.height;
@@ -152,9 +152,8 @@ app.get("/credencial", async (req, res) => {
       logoWidth *= ratio;
       logoHeight *= ratio;
 
-      // Más abajo, casi tocando el borde inferior
       const logoX = (width - logoWidth) / 2;
-      const logoY = height - logoHeight + 5; // antes estaba -10
+      const logoY = height - logoHeight - mmToPt(20); // a unos 2 cm del borde inferior
 
       doc.image(logoPath, logoX, logoY, { width: logoWidth, height: logoHeight });
     }
