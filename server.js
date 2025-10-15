@@ -144,9 +144,9 @@ app.get("/credencial", async (req, res) => {
       const tempDoc = new PDFDocument({ autoFirstPage: false });
       const img = doc.openImage(image);
 
-      // 🔹 SOLO CAMBIO AQUÍ: aumentar logo proporcionalmente
-      const logoMaxWidth = width * 0.5;   // 50% del ancho de la credencial
-      const logoMaxHeight = height * 0.35; // 35% de la altura de la credencial
+      // 🔹 ÚNICO CAMBIO: aumentar logo proporcionalmente
+      const logoMaxWidth = width * 0.5;   // 50% del ancho
+      const logoMaxHeight = height * 0.35; // 35% de la altura
       let logoWidth = img.width;
       let logoHeight = img.height;
 
