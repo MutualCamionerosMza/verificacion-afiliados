@@ -68,7 +68,7 @@ app.get("/credencial", async (req, res) => {
 
     const afiliado = result.rows[0];
 
-    // 📏 Tamaño tipo credencial horizontal (14x8.5 cm aprox)
+    // Tamaño tipo credencial horizontal (14x8.5 cm aprox)
     const mmToPt = (mm) => mm * 2.83465;
     const width = mmToPt(140);
     const height = mmToPt(85);
@@ -82,8 +82,11 @@ app.get("/credencial", async (req, res) => {
     res.setHeader("Content-Disposition", `inline; filename=credencial-${dni}.pdf`);
     doc.pipe(res);
 
-    // Fondo gris claro
-    doc.rect(0, 0, width, height).fill("#e6e6e6");
+    // Fondo con leve degradado gris
+    const gradient = doc.linearGradient(0, 0, 0, height);
+    gradient.stop(0, "#f2f2f2");
+    gradient.stop(1, "#e6e6e6");
+    doc.rect(0, 0, width, height).fill(gradient);
 
     // Marco azul con esquinas redondeadas
     const borderRadius = 15;
@@ -137,26 +140,26 @@ app.get("/credencial", async (req, res) => {
       lineGap: 10,
     });
 
+    // Línea separadora azul antes del logo
+    doc.moveTo(20, height * 0.55).lineTo(width - 20, height * 0.55).lineWidth(2).strokeColor("#003366").stroke();
+
     // Logo centrado en la parte inferior (mucho más grande)
     const logoPath = path.join(__dirname, "assets", "logo.png");
     if (fs.existsSync(logoPath)) {
-      const image = fs.readFileSync(logoPath);
-      const img = doc.openImage(image);
+      const img = doc.openImage(logoPath);
 
-      // Tamaño grande: casi toda la mitad inferior
-      const logoMaxWidth = width * 0.8;   // 80% del ancho
+      const logoMaxWidth = width * 0.9;   // 90% del ancho
       const logoMaxHeight = height * 0.45; // 45% de la altura
+
       let logoWidth = img.width;
       let logoHeight = img.height;
 
-      // Mantener proporción
       const ratio = Math.min(logoMaxWidth / logoWidth, logoMaxHeight / logoHeight);
       logoWidth *= ratio;
       logoHeight *= ratio;
 
-      // Posición: centrado horizontal y alineado al borde inferior
       const logoX = (width - logoWidth) / 2;
-      const logoY = height - logoHeight - 15; // 15 pts de margen inferior
+      const logoY = height - logoHeight - 10; // margen inferior
 
       doc.image(logoPath, logoX, logoY, { width: logoWidth, height: logoHeight });
     }
