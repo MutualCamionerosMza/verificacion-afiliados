@@ -115,7 +115,7 @@ app.get("/credencial", async (req, res) => {
 
     doc.moveDown(1.2);
 
-    // Datos del afiliado
+    // Datos del afiliado (color igual al título)
     doc.font("Helvetica").fillColor("#003366").fontSize(12);
     doc.text(`Nombre: ${afiliado.nombre_completo}`, { align: "left" });
     doc.text(`DNI: ${afiliado.dni}`, { align: "left" });
@@ -137,26 +137,24 @@ app.get("/credencial", async (req, res) => {
       lineGap: 10,
     });
 
-    // 🖼️ Logo centrado en la parte inferior, mucho más grande
+    // 🔹 Logo centrado, más grande y bien abajo
     const logoPath = path.join(__dirname, "assets", "logo.png");
     if (fs.existsSync(logoPath)) {
       const img = doc.openImage(logoPath);
 
-      // 📏 Ajuste del logo (más grande y más abajo)
-      const logoMaxWidth = width * 0.9;   // 90% del ancho total
-      const logoMaxHeight = height * 0.6; // 60% de la altura total
+      const logoMaxWidth = width * 0.9;   // más ancho
+      const logoMaxHeight = height * 0.6; // más alto
 
       let logoWidth = img.width;
       let logoHeight = img.height;
 
-      // Mantener proporción
       const ratio = Math.min(logoMaxWidth / logoWidth, logoMaxHeight / logoHeight);
       logoWidth *= ratio;
       logoHeight *= ratio;
 
-      // Centrar y ubicar bien abajo
+      // Más abajo, casi tocando el borde inferior
       const logoX = (width - logoWidth) / 2;
-      const logoY = height - logoHeight - 5;
+      const logoY = height - logoHeight + 5; // antes estaba -10
 
       doc.image(logoPath, logoX, logoY, { width: logoWidth, height: logoHeight });
     }
