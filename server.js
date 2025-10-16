@@ -15,21 +15,27 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// ------------------- CORS -------------------
+app.use(express.json());
+
+// 🔹 CORS: permitir todas las páginas GitHub Pages de tu usuario
 app.use(
   cors({
-    origin: [
-      "https://mutualcamionerosmza.github.io",
-      "https://mutualcamionerosmza.github.io/panel-administradores",
-      "https://mutualcamionerosmza.github.io/mutual",
-      "https://mutualcamionerosmza.github.io/afiliados",
-    ],
+    origin: (origin, callback) => {
+      if (!origin || origin.includes("github.io")) {
+        callback(null, true);
+      } else {
+        callback(new Error("No permitido por CORS"));
+      }
+    },
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "x-admin-pin"],
   })
 );
 
-// ------------------- PostgreSQL -------------------
+// 🔹 Responder a preflight OPTIONS
+app.options("*", cors());
+
+// 🔹 Conexión PostgreSQL
 const pool = new Pool({
   connectionString: process.env.PG_CONNECTION_STRING,
   ssl: { rejectUnauthorized: false },
@@ -174,6 +180,7 @@ function validarPin(req, res, next) {
   return res.status(403).json({ error: "PIN incorrecto" });
 }
 
+// ➤ Agregar afiliado
 app.post("/admin/cargar-afiliados", validarPin, async (req, res) => {
   const { dni, nombre_completo, nro_afiliado } = req.body;
   try {
@@ -192,6 +199,7 @@ app.post("/admin/cargar-afiliados", validarPin, async (req, res) => {
   }
 });
 
+// ➤ Editar afiliado
 app.put("/admin/editar-afiliado", validarPin, async (req, res) => {
   const { dni, nombre_completo, nro_afiliado } = req.body;
   try {
@@ -210,6 +218,7 @@ app.put("/admin/editar-afiliado", validarPin, async (req, res) => {
   }
 });
 
+// ➤ Eliminar afiliado
 app.post("/admin/eliminar-afiliado", validarPin, async (req, res) => {
   const { dni } = req.body;
   try {
@@ -230,6 +239,7 @@ app.post("/admin/eliminar-afiliado", validarPin, async (req, res) => {
   }
 });
 
+// ➤ Listar logs
 app.get("/admin/listar-logs", validarPin, async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM logs ORDER BY fecha DESC LIMIT 50");
