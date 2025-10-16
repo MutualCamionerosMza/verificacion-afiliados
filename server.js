@@ -16,9 +16,15 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 
 app.use(express.json());
+
+// 🔹 CORS habilitado para los tres frontends
 app.use(
   cors({
-    origin: "https://mutualcamionerosmza.github.io",
+    origin: [
+      "https://MutualCamionerosMza.github.io/panel-administradores",
+      "https://MutualCamionerosMza.github.io/mutual",
+      "https://MutualCamionerosMza.github.io/afiliados"
+    ],
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "x-admin-pin"],
   })
@@ -137,13 +143,13 @@ app.get("/credencial", async (req, res) => {
       lineGap: 10,
     });
 
-    // 🔹 Logo gigante en la parte inferior, ocupando casi todo el ancho y tocando el borde
+    // 🔹 Logo gigante en la parte inferior
     const logoPath = path.join(__dirname, "assets", "logo.png");
     if (fs.existsSync(logoPath)) {
       const img = doc.openImage(logoPath);
 
-      const logoMaxWidth = width * 0.95; // ancho casi total
-      const logoMaxHeight = height * 0.5; // alto máximo, puede ajustar según gusto
+      const logoMaxWidth = width * 0.95;
+      const logoMaxHeight = height * 0.5;
 
       let logoWidth = img.width;
       let logoHeight = img.height;
@@ -153,7 +159,7 @@ app.get("/credencial", async (req, res) => {
       logoHeight *= ratio;
 
       const logoX = (width - logoWidth) / 2;
-      const logoY = height - logoHeight - 2; // casi tocando el borde inferior
+      const logoY = height - logoHeight - 2;
 
       doc.image(logoPath, logoX, logoY, { width: logoWidth, height: logoHeight });
     }
