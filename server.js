@@ -15,22 +15,21 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-app.use(express.json());
-
-// 🔹 CORS habilitado para los tres frontends
+// ------------------- CORS -------------------
 app.use(
   cors({
     origin: [
-      "https://MutualCamionerosMza.github.io/panel-administradores",
-      "https://MutualCamionerosMza.github.io/mutual",
-      "https://MutualCamionerosMza.github.io/afiliados"
+      "https://mutualcamionerosmza.github.io",
+      "https://mutualcamionerosmza.github.io/panel-administradores",
+      "https://mutualcamionerosmza.github.io/mutual",
+      "https://mutualcamionerosmza.github.io/afiliados",
     ],
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "x-admin-pin"],
   })
 );
 
-// 🔹 Conexión PostgreSQL
+// ------------------- PostgreSQL -------------------
 const pool = new Pool({
   connectionString: process.env.PG_CONNECTION_STRING,
   ssl: { rejectUnauthorized: false },
@@ -74,7 +73,6 @@ app.get("/credencial", async (req, res) => {
 
     const afiliado = result.rows[0];
 
-    // Tamaño tipo credencial horizontal (14x8.5 cm aprox)
     const mmToPt = (mm) => mm * 2.83465;
     const width = mmToPt(140);
     const height = mmToPt(85);
@@ -88,10 +86,8 @@ app.get("/credencial", async (req, res) => {
     res.setHeader("Content-Disposition", `inline; filename=credencial-${dni}.pdf`);
     doc.pipe(res);
 
-    // Fondo gris claro
     doc.rect(0, 0, width, height).fill("#e6e6e6");
 
-    // Marco azul con esquinas redondeadas
     const borderRadius = 15;
     doc
       .save()
@@ -109,7 +105,6 @@ app.get("/credencial", async (req, res) => {
       .stroke()
       .restore();
 
-    // Título
     doc
       .fillColor("#003366")
       .font("Helvetica-Bold")
@@ -121,13 +116,11 @@ app.get("/credencial", async (req, res) => {
 
     doc.moveDown(1.2);
 
-    // Datos del afiliado
     doc.font("Helvetica").fillColor("#003366").fontSize(12);
     doc.text(`Nombre: ${afiliado.nombre_completo}`, { align: "left" });
     doc.text(`DNI: ${afiliado.dni}`, { align: "left" });
     doc.text(`N° Afiliado: ${afiliado.nro_afiliado}`, { align: "left" });
 
-    // Fecha y hora
     const fecha = new Date();
     const fechaLocal = new Date(fecha.getTime() - 3 * 60 * 60 * 1000);
     const fechaStr = fechaLocal.toLocaleDateString("es-AR");
@@ -143,7 +136,6 @@ app.get("/credencial", async (req, res) => {
       lineGap: 10,
     });
 
-    // 🔹 Logo gigante en la parte inferior
     const logoPath = path.join(__dirname, "assets", "logo.png");
     if (fs.existsSync(logoPath)) {
       const img = doc.openImage(logoPath);
@@ -182,7 +174,6 @@ function validarPin(req, res, next) {
   return res.status(403).json({ error: "PIN incorrecto" });
 }
 
-// ➤ Agregar afiliado
 app.post("/admin/cargar-afiliados", validarPin, async (req, res) => {
   const { dni, nombre_completo, nro_afiliado } = req.body;
   try {
@@ -201,7 +192,6 @@ app.post("/admin/cargar-afiliados", validarPin, async (req, res) => {
   }
 });
 
-// ➤ Editar afiliado
 app.put("/admin/editar-afiliado", validarPin, async (req, res) => {
   const { dni, nombre_completo, nro_afiliado } = req.body;
   try {
@@ -220,7 +210,6 @@ app.put("/admin/editar-afiliado", validarPin, async (req, res) => {
   }
 });
 
-// ➤ Eliminar afiliado
 app.post("/admin/eliminar-afiliado", validarPin, async (req, res) => {
   const { dni } = req.body;
   try {
@@ -241,7 +230,6 @@ app.post("/admin/eliminar-afiliado", validarPin, async (req, res) => {
   }
 });
 
-// ➤ Listar logs
 app.get("/admin/listar-logs", validarPin, async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM logs ORDER BY fecha DESC LIMIT 50");
